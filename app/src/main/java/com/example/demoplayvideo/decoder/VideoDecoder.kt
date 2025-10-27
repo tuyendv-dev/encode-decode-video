@@ -1,4 +1,4 @@
-package com.example.demoplayvideo
+package com.example.demoplayvideo.decoder
 
 
 import android.media.AudioAttributes
@@ -21,11 +21,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 data class DecoderConfigs(
     val type: String,
-    val videoConfig: VideoConfig?,
-    val audioConfig: AudioConfig?
+    val videoConfig: VideoDecoderConfig?,
+    val audioConfig: AudioDecoderConfig?
 )
 
-data class VideoConfig(
+data class VideoDecoderConfig(
     val codec: String,
     val codedWidth: Int,
     val codedHeight: Int,
@@ -33,7 +33,7 @@ data class VideoConfig(
     val description: String
 )
 
-data class AudioConfig(
+data class AudioDecoderConfig(
     val sampleRate: Int,
     val numberOfChannels: Int,
     val codec: String,
@@ -41,7 +41,7 @@ data class AudioConfig(
 )
 
 class VideoDecoder(
-    private val config: VideoConfig,
+    private val config: VideoDecoderConfig,
     private val surface: Surface? = null,
     private val maxInitDecoder: Int = 1
 ) {
@@ -267,7 +267,7 @@ class VideoDecoder(
 }
 
 class AudioDecoder(
-    private val config: AudioConfig,
+    private val config: AudioDecoderConfig,
     private val maxInitDecoder: Int = 1,
 ) {
     private var codec: MediaCodec? = null

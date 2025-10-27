@@ -1,8 +1,6 @@
-package com.example.demoplayvideo
+package com.example.demoplayvideo.decoder
 
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -11,12 +9,13 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
+import com.example.demoplayvideo.decoder.MediaSourceModule
+import com.example.demoplayvideo.R
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var surfaceView: SurfaceView
     private lateinit var mediaSourceModule: MediaSourceModule
-//    private lateinit var demoSource: DemoSource
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

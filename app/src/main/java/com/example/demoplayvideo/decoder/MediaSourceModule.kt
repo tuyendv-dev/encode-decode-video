@@ -1,4 +1,4 @@
-package com.example.demoplayvideo
+package com.example.demoplayvideo.decoder
 
 import android.util.Log
 import android.view.SurfaceHolder
@@ -26,6 +26,7 @@ class MediaSourceModule(
         val request = Request.Builder()
 //            .url("wss://streaming.ermis.network/stream-gate/software/Ermis-streaming/1bd1ce31-2542-4a9f-9ed3-54d213bcace1")
             .url("wss://streaming.ermis.network/stream-gate/software/Ermis-streaming/a5d7a087-4c87-429c-9983-39189ef94829")
+//            .url("wss://streaming.ermis.network/stream-gate/browser/Ermis-streaming/43fa06de-0e8e-4955-9ec8-daef6796634d")
             .build()
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -69,7 +70,7 @@ class MediaSourceModule(
             val json = JSONObject(text)
             if (json.getString("type") == "DecoderConfigs") {
                 val videoConfigJSON = json.getJSONObject("videoConfig")
-                val videoConfig = VideoConfig(
+                val videoConfig = VideoDecoderConfig(
                     codec = videoConfigJSON.getString("codec"),
                     codedWidth = videoConfigJSON.getInt("codedWidth"),
                     codedHeight = videoConfigJSON.getInt("codedHeight"),
@@ -77,7 +78,7 @@ class MediaSourceModule(
                     description = videoConfigJSON.getString("description"),
                 )
                 val audioConfigJSON = json.getJSONObject("audioConfig")
-                val audioConfig = AudioConfig(
+                val audioConfig = AudioDecoderConfig(
                     sampleRate = audioConfigJSON.getInt("sampleRate"),
                     numberOfChannels = audioConfigJSON.getInt("numberOfChannels"),
                     codec = audioConfigJSON.getString("codec"),
