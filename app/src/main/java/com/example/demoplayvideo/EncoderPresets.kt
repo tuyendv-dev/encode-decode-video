@@ -27,8 +27,8 @@ object EncoderPresets {
         frameRate = 30,
         codec = VideoEncoder.CodecType.H264,
         bitrateMode = VideoEncoder.BitrateMode.VBR,
-        profile =MediaCodecInfo.CodecProfileLevel.AVCProfileMain,
-        level =MediaCodecInfo.CodecProfileLevel.AVCLevel31
+        profile = MediaCodecInfo.CodecProfileLevel.AVCProfileMain,
+        level = MediaCodecInfo.CodecProfileLevel.AVCLevel31
     )
 
     // 480p 30fps - Chất lượng thấp (tiết kiệm băng thông)
@@ -39,8 +39,8 @@ object EncoderPresets {
         frameRate = 30,
         codec = VideoEncoder.CodecType.H264,
         bitrateMode = VideoEncoder.BitrateMode.CBR,
-        profile =MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline,
-        level =MediaCodecInfo.CodecProfileLevel.AVCLevel3
+        profile = MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline,
+        level = MediaCodecInfo.CodecProfileLevel.AVCLevel3
     )
 
     // 1080p 30fps - Full HD
@@ -51,8 +51,8 @@ object EncoderPresets {
         frameRate = 30,
         codec = VideoEncoder.CodecType.H264,
         bitrateMode = VideoEncoder.BitrateMode.VBR,
-        profile =MediaCodecInfo.CodecProfileLevel.AVCProfileHigh,
-        level =MediaCodecInfo.CodecProfileLevel.AVCLevel4
+        profile = MediaCodecInfo.CodecProfileLevel.AVCProfileHigh,
+        level = MediaCodecInfo.CodecProfileLevel.AVCLevel4
     )
 
     // H.265 - Chất lượng cao, hiệu quả hơn
@@ -63,8 +63,8 @@ object EncoderPresets {
         frameRate = 30,
         codec = VideoEncoder.CodecType.H265,
         bitrateMode = VideoEncoder.BitrateMode.VBR,
-        profile =MediaCodecInfo.CodecProfileLevel.HEVCProfileMain,
-        level =MediaCodecInfo.CodecProfileLevel.HEVCMainTierLevel31
+        profile = MediaCodecInfo.CodecProfileLevel.HEVCProfileMain,
+        level = MediaCodecInfo.CodecProfileLevel.HEVCHighTierLevel4
     )
 
     // Audio presets
@@ -87,5 +87,12 @@ object EncoderPresets {
         channelCount = 1,
         bitrate = 64_000, // 64 kbps
         codec = AudioEncoder.CodecType.AAC
+    )
+
+    val AUDIO_OPUS = AudioEncoder.AudioEncoderConfig(
+        sampleRate = 48000,
+        channelCount = 1,
+        bitrate = 64_000,
+        codec = AudioEncoder.CodecType.OPUS
     )
 }

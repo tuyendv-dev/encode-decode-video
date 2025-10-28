@@ -18,6 +18,7 @@ import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.TextureView
+import android.widget.Button
 import androidx.activity.enableEdgeToEdge
 import androidx.annotation.RequiresPermission
 import androidx.appcompat.app.AppCompatActivity
@@ -50,7 +51,7 @@ class LivestreamActivity : AppCompatActivity() {
     private lateinit var textureView: TextureView
     private lateinit var remoteView: SurfaceView
     private lateinit var streamManager: LiveStreamManager
-    private lateinit var mediaDecoderManager: MediaDecoderManager
+    private var mediaDecoderManager: MediaDecoderManager? = null
     private lateinit var webSocket: WebSocket
 
     private var cameraDevice: CameraDevice? = null
@@ -78,13 +79,20 @@ class LivestreamActivity : AppCompatActivity() {
         }
         textureView = findViewById<TextureView>(R.id.localView)
         remoteView = findViewById<SurfaceView>(R.id.remoteView)
+        val btnPhat = findViewById<Button>(R.id.btnPhat)
+        val btnXem = findViewById<Button>(R.id.btnXem)
+        setupWebSocket()
         remoteView.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
-                setupLiveStream()
-//                setupWebSocket()
+//                setupLiveStream()
             }
 
-            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+            override fun surfaceChanged(
+                holder: SurfaceHolder,
+                format: Int,
+                width: Int,
+                height: Int
+            ) {
             }
 
             override fun surfaceDestroyed(holder: SurfaceHolder) {
@@ -95,14 +103,14 @@ class LivestreamActivity : AppCompatActivity() {
     private fun setupLiveStream() {
         // 1. Cấu hình encoder
 //        val videoConfig = EncoderPresets.PRESET_720P_H265
-        val videoConfig = EncoderPresets.PRESET_720P_HIGH
+//        val videoConfig = EncoderPresets.PRESET_720P_HIGH
 //        val videoConfig = EncoderPresets.PRESET_720P_MEDIUM
 //        val videoConfig = EncoderPresets.PRESET_480P_LOW
-//        val videoConfig = EncoderPresets.PRESET_1080P
+        val videoConfig = EncoderPresets.PRESET_1080P
 
+//        val audioConfig = EncoderPresets.AUDIO_OPUS
         val audioConfig = EncoderPresets.AUDIO_HIGH
 //        val audioConfig = EncoderPresets.AUDIO_MEDIUM
-
 
 
         // 2. Setup WebSocket để gửi data
@@ -122,18 +130,29 @@ class LivestreamActivity : AppCompatActivity() {
             onDecoderConfig = { configs ->
                 // Gửi decoder configs nếu cần
                 Log.d(TAG, "onDecoderConfig Decoder configs ready: $configs")
-                setupDecoder(configs)
+                webSocket.send(buildConfigJSON(configs))
+//                setupDecoder(configs)
             }
         )
         streamManager.initialize()
 
         // 4. Setup camera
         textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-            override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+            override fun onSurfaceTextureAvailable(
+                surface: SurfaceTexture,
+                width: Int,
+                height: Int
+            ) {
                 openCamera()
             }
 
-            override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {}
+            override fun onSurfaceTextureSizeChanged(
+                surface: SurfaceTexture,
+                width: Int,
+                height: Int
+            ) {
+            }
+
             override fun onSurfaceTextureDestroyed(surface: SurfaceTexture) = true
             override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
         }
@@ -149,45 +168,37 @@ class LivestreamActivity : AppCompatActivity() {
             videoSurface = remoteView.holder.surface,
             scope = lifecycleScope,
         )
-        mediaDecoderManager.initialize()
+        mediaDecoderManager!!.initialize()
     }
 
     private fun sendToServer(data: ByteArray, isVideo: Boolean, timestamp: Long) {
-//        val header = ByteBuffer.allocate(12).apply {
-//            order(ByteOrder.BIG_ENDIAN)
-//            putInt(data.size) // 4 bytes: payload size
-//            putLong(timestamp) // 8 bytes: timestamp
-//        }.array()
-//        val packet = header + data
-//        val bytes = ByteString.of(*packet)
-//        if (isVideo) {
-            val header = ByteBuffer.allocate(5).apply {
-                order(ByteOrder.BIG_ENDIAN)
-                putInt((timestamp and 0xFFFFFFFF).toInt()) // 4 bytes: payload size
-                put((if (isVideo) 0 else 2).toByte()) // 8 bytes: timestamp
-            }.array()
-            val packet = header + data
-            val bytes = ByteString.of(*packet)
-            Log.e(TAG, "sendToServer: timestamp=$timestamp data=${data.size} send:${bytes.size}",)
-            // Gửi bytes qua WebSocket
+        val header = ByteBuffer.allocate(5).apply {
+            order(ByteOrder.BIG_ENDIAN)
+            putInt((timestamp and 0xFFFFFFFF).toInt()) // 4 bytes: payload size
+            put((if (isVideo) 0 else 2).toByte()) // 8 bytes: timestamp
+        }.array()
+        val packet = header + data
+        val bytes = ByteString.of(*packet)
 
+        // Gửi bytes qua WebSocket
+        val send = webSocket.send(bytes)
+//        Log.e(TAG, "sendToServer: sendStatus=$send timestamp=$timestamp data=${data.size} send:${bytes.size}")
 
-            //Decoder
-            val dataGet = bytes.toByteArray()
-            val buffer = ByteBuffer.wrap(dataGet)
-            val timestampGet = buffer.getInt()
-            val frameType = buffer.get()
-            val frameData = ByteArray(dataGet.size - 5)
-            buffer.get(frameData)
-
-            if (frameType.toInt() == 2) {
-                mediaDecoderManager.decodeAudio(frameData, 0)
-            } else {
-                val annexBFrame: ByteArray = convertAvcCToAnnexB(frameData, 4)
-                Log.e(TAG, "getToServer: timestamp=$timestampGet type=${frameType.toInt()} frameData=${frameData.size} annexBFrame=${annexBFrame.size}",)
-                mediaDecoderManager.decodeVideo(annexBFrame, 0)
-            }
-//        }
+        //Decoder
+//            val dataGet = bytes.toByteArray()
+//            val buffer = ByteBuffer.wrap(dataGet)
+//            val timestampGet = buffer.getInt()
+//            val frameType = buffer.get()
+//            val frameData = ByteArray(dataGet.size - 5)
+//            buffer.get(frameData)
+//
+//            if (frameType.toInt() == 2) {
+//                mediaDecoderManager.decodeAudio(frameData, 0)
+//            } else {
+//                val annexBFrame: ByteArray = convertAvcCToAnnexB(frameData, 4)
+//                Log.e(TAG, "getToServer: timestamp=$timestampGet type=${frameType.toInt()} frameData=${frameData.size} annexBFrame=${annexBFrame.size}",)
+//                mediaDecoderManager.decodeVideo(annexBFrame, 0)
+//            }
     }
 
     fun convertAvcCToAnnexB(avcc: ByteArray, nalLengthSize: Int): ByteArray {
@@ -217,7 +228,8 @@ class LivestreamActivity : AppCompatActivity() {
 
         try {
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
-                != PackageManager.PERMISSION_GRANTED) {
+                != PackageManager.PERMISSION_GRANTED
+            ) {
                 return
             }
 
@@ -279,15 +291,19 @@ class LivestreamActivity : AppCompatActivity() {
         encoderSurface: Surface
     ) {
         try {
-            val captureRequest = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)?.apply {
-                addTarget(previewSurface)
-                addTarget(encoderSurface)
+            val captureRequest =
+                cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)?.apply {
+                    addTarget(previewSurface)
+                    addTarget(encoderSurface)
 
-                // Cấu hình cho video recording
-                set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
-                set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
-            }?.build()
+                    // Cấu hình cho video recording
+                    set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
+                    set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                    set(
+                        CaptureRequest.CONTROL_AF_MODE,
+                        CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
+                    )
+                }?.build()
 
             captureRequest?.let {
                 session.setRepeatingRequest(it, null, null)
@@ -308,7 +324,8 @@ class LivestreamActivity : AppCompatActivity() {
         val bufferSize = minBufferSize * 2
 
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-            != PackageManager.PERMISSION_GRANTED) {
+            != PackageManager.PERMISSION_GRANTED
+        ) {
             return
         }
 
@@ -361,71 +378,6 @@ class LivestreamActivity : AppCompatActivity() {
         Log.d(TAG, "Cleanup completed")
     }
 
-    private fun setupWebSocket() {
-        val client = OkHttpClient.Builder()
-            .readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
-            .build()
-
-        val request = Request.Builder()
-            .url("wss://streaming.ermis.network/stream-gate/software/Ermis-streaming/a5d7a087-4c87-429c-9983-39189ef94829")
-            .build()
-
-        webSocket = client.newWebSocket(request, object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.d(TAG, "WebSocket connected")
-            }
-
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e(TAG, "WebSocket error", t)
-            }
-
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                Log.e(TAG, "onMessage: text= $text")
-                val config = getDecoderConfigs(text)
-                if (config == null) {
-                    Log.e(TAG, "onMessage: Invalid DecoderConfigs")
-                    return
-                } else {
-                    setupDecoder(config)
-                }
-            }
-
-            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                Log.i(TAG, "onMessage: bytes size=${bytes.size} bytes=$bytes")
-                val data = bytes.toByteArray()
-                val buffer = ByteBuffer.wrap(data)
-                val timestamp = buffer.getInt()
-                val frameType = buffer.get()
-                val frameData = ByteArray(data.size - 5)
-                buffer.get(frameData)
-                if (frameType.toInt() == 2) {
-                    Log.e(TAG, ">>>> decodeAudio: frameData=$frameData", )
-                    mediaDecoderManager.decodeAudio(frameData, 0)
-                } else {
-                    val annexBFrame: ByteArray = convertAvcCToAnnexB(frameData, 4)
-                    mediaDecoderManager.decodeVideo(annexBFrame, 0)
-                }
-            }
-        })
-
-//            override fun onMessage(webSocket: WebSocket, text: String) {
-//                // Nhận control messages từ server
-//                Log.d(TAG, "Server message: $text")
-//
-//                when {
-//                    text.contains("request_keyframe") -> {
-//                        streamManager.requestKeyFrame()
-//                    }
-//                    text.contains("adjust_bitrate") -> {
-//                        // Parse và điều chỉnh bitrate
-//                        val bitrate = text.substringAfter(":").toIntOrNull() ?: 2_000_000
-//                        streamManager.adjustBitrate(bitrate)
-//                    }
-//                }
-//            }
-//        })
-    }
-
     private fun getDecoderConfigs(text: String): DecoderConfigs? {
         try {
             val json = JSONObject(text)
@@ -457,5 +409,82 @@ class LivestreamActivity : AppCompatActivity() {
             Log.e(TAG, "getDecoderConfigs error : " + e)
             return null
         }
+    }
+
+    private fun buildConfigJSON(configs: DecoderConfigs): String {
+        return JSONObject().apply {
+            put("type", configs.type)
+            configs.videoConfig?.let { video ->
+                put("videoConfig", JSONObject().apply {
+                    put("codec", video.codec)
+                    put("codedWidth", video.codedWidth)
+                    put("codedHeight", video.codedHeight)
+                    put("frameRate", video.frameRate)
+                    put("description", video.description)
+                })
+            }
+            configs.audioConfig?.let { audio ->
+                put("audioConfig", JSONObject().apply {
+                    put("sampleRate", audio.sampleRate)
+                    put("numberOfChannels", audio.numberOfChannels)
+                    put("codec", audio.codec)
+                    put("description", audio.description)
+                })
+            }
+        }.toString()
+    }
+
+    private fun setupWebSocket() {
+        val client = OkHttpClient.Builder()
+            .readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
+            .build()
+
+        val request = Request.Builder()
+//            .url("wss://streaming.ermis.network/stream-gate/software/Ermis-streaming/a5d7a087-4c87-429c-9983-39189ef94829")
+//            .url("wss://4044.bandia.vn/publish/1234567890")
+            .url("wss://4044.bandia.vn/consume/1234567890")
+            .build()
+
+        webSocket = client.newWebSocket(request, object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                Log.d(TAG, "WebSocket connected")
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                Log.e(TAG, "WebSocket error", t)
+            }
+
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                Log.e(TAG, "onMessage: text= $text")
+                val config = getDecoderConfigs(text)
+                if (config == null) {
+                    Log.e(TAG, "onMessage: Invalid DecoderConfigs")
+                    return
+                } else {
+                    setupDecoder(config)
+                }
+            }
+
+            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                if (mediaDecoderManager == null) {
+                    Log.e(TAG, "onMessage: mediaDecoderManager not initialized")
+                    return
+                }
+                Log.i(TAG, "onMessage: bytes size=${bytes.size} bytes=$bytes")
+                val data = bytes.toByteArray()
+                val buffer = ByteBuffer.wrap(data)
+                val timestamp = buffer.getInt()
+                val frameType = buffer.get()
+                val frameData = ByteArray(data.size - 5)
+                buffer.get(frameData)
+                if (frameType.toInt() == 2) {
+                    Log.e(TAG, ">>>> decodeAudio: frameData=$frameData")
+                    mediaDecoderManager!!.decodeAudio(frameData, 0)
+                } else {
+                    val annexBFrame: ByteArray = convertAvcCToAnnexB(frameData, 4)
+                    mediaDecoderManager!!.decodeVideo(annexBFrame, 0)
+                }
+            }
+        })
     }
 }

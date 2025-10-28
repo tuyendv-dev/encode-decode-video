@@ -95,22 +95,16 @@ class LiveStreamManager(
             try {
                 // Đợi một chút để encoder output format ổn định
                 delay(100)
-
                 // Trích xuất video config
                 videoEncoder?.codec?.let { codec ->
-//                    videoDecoderConfig = configExtractor.extractVideoConfig(
-//                        codec,
-//                        createVideoFormat()
-//                    )
-                    videoDecoderConfig = MediaFormatConverter.toVideoConfig(codec.outputFormat)
+                    videoDecoderConfig = configExtractor.extractVideoConfig(
+                        codec,
+                        videoConfig
+                    )
                 }
-
                 // Trích xuất audio config
                 audioEncoder?.codec?.let { codec ->
-                    audioDecoderConfig = configExtractor.extractAudioConfig(
-                        codec,
-                        createAudioFormat()
-                    )
+                    audioDecoderConfig = configExtractor.extractAudioConfig(codec)
                 }
 
                 // Gửi configs
@@ -137,24 +131,6 @@ class LiveStreamManager(
                 Log.e(TAG, "Error in config extraction", e)
             }
         }
-    }
-
-    private fun createVideoFormat(): MediaFormat {
-        return MediaFormat.createVideoFormat(
-            videoConfig.codec.mimeType,
-            videoConfig.width,
-            videoConfig.height
-        ).apply {
-            setInteger(MediaFormat.KEY_FRAME_RATE, videoConfig.frameRate)
-        }
-    }
-
-    private fun createAudioFormat(): MediaFormat {
-        return MediaFormat.createAudioFormat(
-            audioConfig.codec.mimeType,
-            audioConfig.sampleRate,
-            audioConfig.channelCount
-        )
     }
 
     fun encodeAudio(pcmData: ByteArray, timestampUs: Long) {

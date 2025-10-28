@@ -167,7 +167,7 @@ class VideoEncoder(
 
                                 // Log keyframe
                                 if (isKeyFrame) {
-                                    Log.d(TAG, "Encoded keyframe #$frameIndex: ${data.size} bytes")
+//                                    Log.d(TAG, "Encoded keyframe #$frameIndex: ${data.size} bytes")
                                 }
 
                                 // Callback
@@ -175,10 +175,7 @@ class VideoEncoder(
                                     firstFrameTimeUs = bufferInfo.presentationTimeUs
                                 }
                                 val timestamp = (bufferInfo.presentationTimeUs - firstFrameTimeUs) / 1000 // ms
-//                                val timestamp = bufferInfo.presentationTimeUs
                                 val avcc = annexBToAvcc(data)
-                                val size = getIntFromFirst4Bytes(avcc)
-                                Log.d(TAG, ">>>>>> Encoded frame #$frameIndex: size=$size  data=${avcc.size}")
                                 val frame = EncodedFrame(
                                     data = avcc,
                                     isKeyFrame = isKeyFrame,
@@ -285,46 +282,6 @@ class VideoEncoder(
         }
 
         return output.toByteArray()
-    }
-    fun getIntFromFirst4Bytes(data: ByteArray): Int {
-        require(data.size >= 4) { "ByteArray phải có ít nhất 4 byte" }
-
-        return ByteBuffer.wrap(data, 0, 4)
-            .order(ByteOrder.BIG_ENDIAN) // hoặc LITTLE_ENDIAN tuỳ format
-            .int
-    }
-
-    fun parseLengthPrefixedNALUs(data: ByteArray): List<ByteArray> {
-        val nalus = mutableListOf<ByteArray>()
-        val buffer = ByteBuffer.wrap(data).order(ByteOrder.BIG_ENDIAN)
-
-        while (buffer.remaining() > 4) {
-            // Đọc 4 bytes đầu để lấy length của NALU
-            val length = buffer.getInt()
-            Log.d(TAG, ">>>>>>> length=${length} data=${data.size}")
-            if (length <= 0 || length > buffer.remaining()) {
-                break // dữ liệu lỗi hoặc hết buffer
-            }
-
-            // Đọc NALU data theo độ dài vừa lấy
-            val nalu = ByteArray(length)
-            buffer.get(nalu)
-
-            nalus.add(nalu)
-        }
-
-        return nalus
-    }
-
-    private fun prettyHexDump(data: ByteArray, bytesPerLine: Int = 16) {
-        val sb = StringBuilder()
-        for (i in data.indices step bytesPerLine) {
-            val line = data
-                .slice(i until minOf(i + bytesPerLine, data.size))
-                .joinToString(" ") { String.format("%02X", it) }
-            sb.append(String.format("%04X: %s\n", i, line))
-        }
-        Log.d("HexDump", "\n$sb")
     }
 
     /**

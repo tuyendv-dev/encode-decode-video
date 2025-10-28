@@ -10,12 +10,14 @@ import android.media.MediaFormat
 import android.util.Base64
 import android.util.Log
 import android.view.Surface
+import com.example.demoplayvideo.config.MediaFormatConverter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -79,8 +81,10 @@ class VideoDecoder(
                     mimeType == MediaFormat.MIMETYPE_VIDEO_AVC -> {
                         // H.264/AVC: Tách SPS và PPS
                         val (sps, pps) = extractAvcCsd(csdData)
-                        setByteBuffer("csd-0", ByteBuffer.wrap(sps))
-                        setByteBuffer("csd-1", ByteBuffer.wrap(pps))
+//                        setByteBuffer("csd-0", ByteBuffer.wrap(sps))
+//                        setByteBuffer("csd-1", ByteBuffer.wrap(pps))
+                        setByteBuffer("csd-0", ByteBuffer.wrap(convertCsdToAnnexB(sps)))
+                        setByteBuffer("csd-1", ByteBuffer.wrap(convertCsdToAnnexB(pps)))
                     }
 
                     mimeType == MediaFormat.MIMETYPE_VIDEO_HEVC -> {
@@ -148,8 +152,20 @@ class VideoDecoder(
             ((data[offset].toInt() and 0xFF) shl 8) or (data[offset + 1].toInt() and 0xFF)
         offset += 2
         val pps = data.copyOfRange(offset, offset + ppsLength)
-
+        Log.e(TAG, "CSD hex: ${sps.take(20).joinToString(" ") { "%02x".format(it) }}...")
+        Log.e(TAG, "CSD hex: ${pps.take(20).joinToString(" ") { "%02x".format(it) }}...")
         return Pair(sps, pps)
+    }
+
+    fun convertCsdToAnnexB(csd: ByteArray): ByteArray {
+        val startCode = byteArrayOf(0x00, 0x00, 0x00, 0x01)
+        val output = ByteArrayOutputStream()
+
+        // Thêm start code + csd
+        output.write(startCode)
+        output.write(csd)
+
+        return output.toByteArray()
     }
 
     fun decode(encodedData: ByteArray, presentationTimeUs: Long, isKeyFrame: Boolean = false) {
@@ -283,6 +299,7 @@ class AudioDecoder(
 
     fun initialize() {
         try {
+            initializeCount++
             val mimeType = getMimeType(config.codec)
             Log.d(TAG, "Initializing audio decoder: $mimeType")
 
@@ -314,7 +331,6 @@ class AudioDecoder(
 
             // Khởi tạo AudioTrack
             initAudioTrack()
-
             Log.d(TAG, "Audio decoder initialized successfully")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize audio decoder", e)
