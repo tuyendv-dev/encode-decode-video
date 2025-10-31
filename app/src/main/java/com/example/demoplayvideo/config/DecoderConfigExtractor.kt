@@ -26,7 +26,10 @@ class DecoderConfigExtractor {
     /**
      * Trích xuất video config từ encoder
      */
-    fun extractVideoConfig(codec: MediaCodec, videoConfig: VideoEncoder.VideoEncoderConfig): VideoDecoderConfig? {
+    fun extractVideoConfig(
+        codec: MediaCodec,
+        videoConfig: VideoEncoder.VideoEncoderConfig
+    ): VideoDecoderConfig? {
         return try {
             val outputFormat = codec.outputFormat
             Log.d(TAG, "Converting MediaFormat to VideoConfig...")
@@ -142,16 +145,18 @@ class DecoderConfigExtractor {
         ppsBuffer.rewind()
         val pps = removeNALStartCode(pps1)
 
-        Log.e(TAG, "CSD hex: ${sps.take(20).joinToString(" ") { "%02x".format(it) }}...")
-        Log.e(TAG, "CSD hex: ${pps.take(20).joinToString(" ") { "%02x".format(it) }}...")
-
         // Parse profile, level từ SPS
         // SPS format: [NAL header][profile][constraint][level]...
         val profile = if (sps.size > 1) sps[1] else 0x64.toByte() // High profile default
         val compatibility = if (sps.size > 2) sps[2] else 0x00.toByte()
         val level = if (sps.size > 3) sps[3] else 0x28.toByte() // Level 4.0
 
-        Log.e(TAG, "H.264 Profile: 0x${profile.toString(16)}, compatibility=${compatibility.toString(16)} Level: 0x${level.toString(16)}")
+        Log.e(
+            TAG,
+            "H.264 Profile: 0x${profile.toString(16)}, compatibility=${compatibility.toString(16)} Level: 0x${
+                level.toString(16)
+            }"
+        )
 
         // Build avcC
         val avcC = ByteArray(11 + sps.size + pps.size)
@@ -186,7 +191,12 @@ class DecoderConfigExtractor {
     /**
      * Generate codec string
      */
-    private fun generateCodecString(mimeType: String, format: MediaFormat, csd: ByteArray, videoConfig: VideoEncoder.VideoEncoderConfig): String {
+    private fun generateCodecString(
+        mimeType: String,
+        format: MediaFormat,
+        csd: ByteArray,
+        videoConfig: VideoEncoder.VideoEncoderConfig
+    ): String {
         return when {
             mimeType.contains("avc") -> {
 
@@ -243,7 +253,6 @@ class DecoderConfigExtractor {
                 Log.w(TAG, "No audio CSD found")
                 return null
             }
-
             // AAC codec string
             val codecString = when {
                 mimeType.contains("aac") -> "mp4a.40.2" // AAC-LC
@@ -267,8 +276,6 @@ class DecoderConfigExtractor {
         }
     }
 
-
-
     /**
      * Trích xuất CSD từ MediaFormat hoặc codec config buffer
      */
@@ -282,32 +289,65 @@ class DecoderConfigExtractor {
             }
 
             mimeType.contains("opus") -> {
-                // Try csd-0 (OpusHead)
                 val csd0 = format.getByteBuffer("csd-0")?.let { buffer ->
-                    ByteArray(buffer.remaining()).also {
-                        buffer.get(it)
-                        buffer.rewind()
-                    }
-                }
-                if (csd0 != null && csd0.isNotEmpty()) {
-                    Log.d(TAG, "Found csd-0: ${csd0.size} bytes")
-                    return csd0
-                }
-                // Try csd-1 (OpusComment) - optional
-                val csd1 = format.getByteBuffer("csd-1")?.let { buffer ->
-                    ByteArray(buffer.remaining()).also {
-                        buffer.get(it)
-                        buffer.rewind()
-                    }
-                }
-                if (csd1 != null && csd1.isNotEmpty()) {
-                    Log.d(TAG, "Found csd-1 (OpusComment): ${csd1.size} bytes")
-                }
-                return csd0
+                    ByteArray(buffer.remaining()).also { buffer.get(it) }
+                } ?: return null
+                val opusHead = extractOpusHead(csd0) ?: return null
+                Log.e(
+                    TAG,
+                    "extractAudioCSD opusHead size=${opusHead.size} hex: ${
+                        opusHead.joinToString(" ") {
+                            "%02x".format(it)
+                        }
+                    }..."
+                )
+                return opusHead
             }
 
             else -> return null
         }
+    }
+
+    /**
+     * Parse full csd-0 (Codec Specific Data) from Android MediaCodec Opus encoder.
+     * It extracts only the real "OpusHead" block and ignores "AOPUSHDR", "AOPUSDLY", "AOPUSPRL".
+     *
+     * @param csd0 The full ByteArray of csd-0 from MediaCodec
+     * @return A ByteArray containing only the valid OpusHead header (19 bytes), or null if not found.
+     */
+    fun extractOpusHead(csd0: ByteArray): ByteArray? {
+        val opusMagic = "OpusHead".encodeToByteArray()
+        val start = indexOfSequence(csd0, opusMagic)
+        if (start == -1) {
+            Log.e(TAG, "OpusHead not found in csd-0")
+            return null
+        }
+
+        // Header length per RFC 7845 (OpusHead) is at least 19 bytes
+        val headerLength = 19
+        if (csd0.size < start + headerLength) {
+            Log.e(TAG, "Invalid csd-0: too short for OpusHead header")
+            return null
+        }
+
+        val header = csd0.copyOfRange(start, start + headerLength)
+        Log.d(TAG, "Extracted OpusHead header (${header.size} bytes)")
+        Log.d(TAG, "OpusHead (Base64): ${Base64.encodeToString(header, Base64.NO_WRAP)}")
+
+        return header
+    }
+
+    /**
+     * Utility: find the start index of a byte sequence inside another ByteArray.
+     */
+    private fun indexOfSequence(data: ByteArray, sequence: ByteArray): Int {
+        outer@ for (i in 0..data.size - sequence.size) {
+            for (j in sequence.indices) {
+                if (data[i + j] != sequence[j]) continue@outer
+            }
+            return i
+        }
+        return -1
     }
 
     /**
