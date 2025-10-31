@@ -10,7 +10,6 @@ import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
 import android.media.AudioFormat
 import android.media.AudioRecord
-import android.media.MediaCodecInfo
 import android.media.MediaRecorder
 import android.os.Bundle
 import android.util.Log
@@ -20,7 +19,6 @@ import android.view.SurfaceView
 import android.view.TextureView
 import android.widget.Button
 import androidx.activity.enableEdgeToEdge
-import androidx.annotation.RequiresPermission
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.view.ViewCompat
@@ -29,7 +27,6 @@ import androidx.lifecycle.lifecycleScope
 import com.example.demoplayvideo.decoder.AudioDecoderConfig
 import com.example.demoplayvideo.decoder.DecoderConfigs
 import com.example.demoplayvideo.decoder.MediaDecoderManager
-import com.example.demoplayvideo.decoder.MediaSourceModule
 import com.example.demoplayvideo.decoder.VideoDecoderConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -108,8 +105,8 @@ class LivestreamActivity : AppCompatActivity() {
 //        val videoConfig = EncoderPresets.PRESET_480P_LOW
         val videoConfig = EncoderPresets.PRESET_1080P
 
-//        val audioConfig = EncoderPresets.AUDIO_OPUS
-        val audioConfig = EncoderPresets.AUDIO_HIGH
+        val audioConfig = EncoderPresets.AUDIO_OPUS
+//        val audioConfig = EncoderPresets.AUDIO_HIGH
 //        val audioConfig = EncoderPresets.AUDIO_MEDIUM
 
 
@@ -185,20 +182,24 @@ class LivestreamActivity : AppCompatActivity() {
 //        Log.e(TAG, "sendToServer: sendStatus=$send timestamp=$timestamp data=${data.size} send:${bytes.size}")
 
         //Decoder
-//            val dataGet = bytes.toByteArray()
-//            val buffer = ByteBuffer.wrap(dataGet)
-//            val timestampGet = buffer.getInt()
-//            val frameType = buffer.get()
-//            val frameData = ByteArray(dataGet.size - 5)
-//            buffer.get(frameData)
+//        val dataGet = bytes.toByteArray()
+//        val buffer = ByteBuffer.wrap(dataGet)
+//        val timestampGet = buffer.getInt()
+//        val frameType = buffer.get()
+//        val frameData = ByteArray(dataGet.size - 5)
+//        buffer.get(frameData)
 //
-//            if (frameType.toInt() == 2) {
-//                mediaDecoderManager.decodeAudio(frameData, 0)
-//            } else {
-//                val annexBFrame: ByteArray = convertAvcCToAnnexB(frameData, 4)
-//                Log.e(TAG, "getToServer: timestamp=$timestampGet type=${frameType.toInt()} frameData=${frameData.size} annexBFrame=${annexBFrame.size}",)
-//                mediaDecoderManager.decodeVideo(annexBFrame, 0)
-//            }
+//        if (frameType.toInt() == 2) {
+////            mediaDecoderManager?.decodeAudio(frameData, 0)
+//            opusAudioPlayer?.playFrame(frameData)
+//        } else {
+//            val annexBFrame: ByteArray = convertAvcCToAnnexB(frameData, 4)
+//            Log.e(
+//                TAG,
+//                "getToServer: timestamp=$timestampGet type=${frameType.toInt()} frameData=${frameData.size} annexBFrame=${annexBFrame.size}",
+//            )
+//            mediaDecoderManager?.decodeVideo(annexBFrame, 0)
+//        }
     }
 
     fun convertAvcCToAnnexB(avcc: ByteArray, nalLengthSize: Int): ByteArray {
@@ -317,7 +318,7 @@ class LivestreamActivity : AppCompatActivity() {
 
     private fun setupAudioRecording() {
         val sampleRate = 48000
-        val channelConfig = AudioFormat.CHANNEL_IN_STEREO
+        val channelConfig = AudioFormat.CHANNEL_IN_MONO
         val audioFormat = AudioFormat.ENCODING_PCM_16BIT
 
         val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
@@ -443,6 +444,7 @@ class LivestreamActivity : AppCompatActivity() {
 //            .url("wss://streaming.ermis.network/stream-gate/software/Ermis-streaming/a5d7a087-4c87-429c-9983-39189ef94829")
 //            .url("wss://4044.bandia.vn/publish/1234567890")
             .url("wss://4044.bandia.vn/consume/1234567890")
+//            .url("wss://streaming.ermis.network/stream-gate/browser/Ermis-streaming/43fa06de-0e8e-4955-9ec8-daef6796634d")
             .build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {

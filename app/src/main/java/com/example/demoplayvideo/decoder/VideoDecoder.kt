@@ -10,7 +10,6 @@ import android.media.MediaFormat
 import android.util.Base64
 import android.util.Log
 import android.view.Surface
-import com.example.demoplayvideo.config.MediaFormatConverter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -286,7 +285,8 @@ class AudioDecoder(
     private val config: AudioDecoderConfig,
     private val maxInitDecoder: Int = 1,
 ) {
-    private var codec: MediaCodec? = null
+    private var mediaCodec: MediaCodec? = null
+    private var opusDecoder: OpusDecoder? = null
     private val isRunning = AtomicBoolean(false)
     private var decoderJob: Job? = null
     private var audioTrack: AudioTrack? = null
@@ -303,32 +303,42 @@ class AudioDecoder(
             val mimeType = getMimeType(config.codec)
             Log.d(TAG, "Initializing audio decoder: $mimeType")
 
-            codec = MediaCodec.createDecoderByType(mimeType)
+            if (mimeType == MediaFormat.MIMETYPE_AUDIO_OPUS) {
+                // Khởi tạo Opus decoder
+                opusDecoder = OpusDecoder(
+                    sampleRate = config.sampleRate,
+                    channels = config.numberOfChannels
+                )
+                mediaCodec = null
+            } else {
+                opusDecoder = null
+                mediaCodec = MediaCodec.createDecoderByType(mimeType)
 
-            val format = MediaFormat.createAudioFormat(
-                mimeType,
-                config.sampleRate,
-                config.numberOfChannels
-            ).apply {
-                setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384) //16KB
+                val format = MediaFormat.createAudioFormat(
+                    mimeType,
+                    config.sampleRate,
+                    config.numberOfChannels
+                ).apply {
+                    setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384) //16KB
 
-                // Decode CSD từ description
-                val csdData = Base64.decode(config.description, Base64.DEFAULT)
-                setByteBuffer("csd-0", ByteBuffer.wrap(csdData))
+                    // Decode CSD từ description
+                    val csdData = Base64.decode(config.description, Base64.DEFAULT)
+                    setByteBuffer("csd-0", ByteBuffer.wrap(csdData))
 
-                // AAC profile
-                if (mimeType == MediaFormat.MIMETYPE_AUDIO_AAC) {
-                    setInteger(
-                        MediaFormat.KEY_AAC_PROFILE,
-                        MediaCodecInfo.CodecProfileLevel.AACObjectLC
-                    )
+                    // AAC profile
+                    if (mimeType == MediaFormat.MIMETYPE_AUDIO_AAC) {
+                        setInteger(
+                            MediaFormat.KEY_AAC_PROFILE,
+                            MediaCodecInfo.CodecProfileLevel.AACObjectLC
+                        )
+                    }
                 }
+
+                mediaCodec?.configure(format, null, null, 0)
+                mediaCodec?.start()
             }
 
-            codec?.configure(format, null, null, 0)
-            codec?.start()
             isRunning.set(true)
-
             // Khởi tạo AudioTrack
             initAudioTrack()
             Log.d(TAG, "Audio decoder initialized successfully")
@@ -397,8 +407,25 @@ class AudioDecoder(
     }
 
     fun decode(encodedData: ByteArray, presentationTimeUs: Long) {
-        val codec = this.codec ?: return
+        // If using Opus wrapper, decode to PCM and write to AudioTrack directly
+        opusDecoder?.let { wrapper ->
+            val pcm = wrapper.decode(encodedData)
+            if (pcm.isNotEmpty()) {
+                try {
+                    val written = audioTrack?.write(pcm, 0, pcm.size, AudioTrack.WRITE_BLOCKING) ?: 0
+                    if (written < 0) {
+                        Log.e(TAG, "AudioTrack write error (opus): $written")
+                    } else if (written != pcm.size) {
+                        Log.w(TAG, "AudioTrack underrun (opus): written=$written, expected=${pcm.size}")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error writing opus PCM to AudioTrack", e)
+                }
+            }
+            return
+        }
 
+        val codec = this.mediaCodec ?: return
         try {
             val inputBufferIndex = codec.dequeueInputBuffer(TIMEOUT_US)
             if (inputBufferIndex >= 0) {
@@ -423,8 +450,14 @@ class AudioDecoder(
     }
 
     fun startDecoding(scope: CoroutineScope) {
+        // If using Opus wrapper, we don't need codec output loop
+        if (opusDecoder != null) {
+            // no-op; audio is written directly in decode(...)
+            return
+        }
+
         decoderJob = scope.launch(Dispatchers.Default) {
-            val codec = this@AudioDecoder.codec ?: return@launch
+            val codec = this@AudioDecoder.mediaCodec ?: return@launch
             val bufferInfo = MediaCodec.BufferInfo()
 
             while (isRunning.get() && isActive) {
@@ -546,7 +579,7 @@ class AudioDecoder(
 
     fun flush() {
         try {
-            codec?.flush()
+            mediaCodec?.flush()
         } catch (e: IllegalStateException) {
             Log.e(TAG, "Cannot flush codec in current state", e)
             handleError(e)
@@ -568,19 +601,28 @@ class AudioDecoder(
             Log.e(TAG, "Error releasing AudioTrack", e)
         }
 
+        // Release Opus wrapper if used
         try {
-            codec?.stop()
+            opusDecoder?.release()
+            opusDecoder = null
+            Log.d(TAG, "Opus decoder released")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error releasing Opus decoder", e)
+        }
+
+        try {
+            mediaCodec?.stop()
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping codec", e)
         }
 
         try {
-            codec?.release()
+            mediaCodec?.release()
         } catch (e: Exception) {
             Log.e(TAG, "Error releasing codec", e)
         }
 
-        codec = null
+        mediaCodec = null
         Log.d(TAG, "Audio decoder released")
     }
 }

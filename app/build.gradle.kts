@@ -15,6 +15,19 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // CMake configuration
+        externalNativeBuild {
+            cmake {
+                cppFlags += listOf("-std=c++14", "-frtti", "-fexceptions")
+                arguments += listOf("-DANDROID_STL=c++_shared")
+            }
+        }
+
+        // Specify ABIs to build
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
     }
 
     buildTypes {
@@ -26,6 +39,18 @@ android {
             )
         }
     }
+
+    // CMake configuration
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.18.1"
+        }
+    }
+
+    // Ensure jniLibs are packaged
+    sourceSets["main"].jniLibs.srcDirs("src/main/jniLibs")
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
