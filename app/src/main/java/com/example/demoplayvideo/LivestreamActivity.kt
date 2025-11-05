@@ -81,7 +81,7 @@ class LivestreamActivity : AppCompatActivity() {
         setupWebSocket()
         remoteView.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
-//                setupLiveStream()
+                setupLiveStream()
             }
 
             override fun surfaceChanged(
@@ -99,11 +99,11 @@ class LivestreamActivity : AppCompatActivity() {
 
     private fun setupLiveStream() {
         // 1. Cấu hình encoder
-//        val videoConfig = EncoderPresets.PRESET_720P_H265
+        val videoConfig = EncoderPresets.PRESET_720P_H265
 //        val videoConfig = EncoderPresets.PRESET_720P_HIGH
 //        val videoConfig = EncoderPresets.PRESET_720P_MEDIUM
 //        val videoConfig = EncoderPresets.PRESET_480P_LOW
-        val videoConfig = EncoderPresets.PRESET_1080P
+//        val videoConfig = EncoderPresets.PRESET_1080P
 
         val audioConfig = EncoderPresets.AUDIO_OPUS
 //        val audioConfig = EncoderPresets.AUDIO_HIGH
@@ -202,7 +202,7 @@ class LivestreamActivity : AppCompatActivity() {
 //        }
     }
 
-    fun convertAvcCToAnnexB(avcc: ByteArray, nalLengthSize: Int): ByteArray {
+    fun convertAvccOrHvccToAnnexB(avcc: ByteArray, nalLengthSize: Int): ByteArray {
         val input = ByteBuffer.wrap(avcc).order(ByteOrder.BIG_ENDIAN)
         val output = ByteArrayOutputStream()
 
@@ -442,8 +442,9 @@ class LivestreamActivity : AppCompatActivity() {
 
         val request = Request.Builder()
 //            .url("wss://streaming.ermis.network/stream-gate/software/Ermis-streaming/a5d7a087-4c87-429c-9983-39189ef94829")
-//            .url("wss://4044.bandia.vn/publish/1234567890")
-            .url("wss://4044.bandia.vn/consume/1234567890")
+//            .url("wss://streaming.ermis.network/stream-gate/software/Ermis-streaming/941b688c-cd0e-4e25-8975-e84e28c50029")
+            .url("wss://4044.bandia.vn/publish/12345678901")
+//            .url("wss://4044.bandia.vn/consume/12345678901")
 //            .url("wss://streaming.ermis.network/stream-gate/browser/Ermis-streaming/43fa06de-0e8e-4955-9ec8-daef6796634d")
             .build()
 
@@ -480,10 +481,9 @@ class LivestreamActivity : AppCompatActivity() {
                 val frameData = ByteArray(data.size - 5)
                 buffer.get(frameData)
                 if (frameType.toInt() == 2) {
-                    Log.e(TAG, ">>>> decodeAudio: frameData=$frameData")
                     mediaDecoderManager!!.decodeAudio(frameData, 0)
                 } else {
-                    val annexBFrame: ByteArray = convertAvcCToAnnexB(frameData, 4)
+                    val annexBFrame: ByteArray = convertAvccOrHvccToAnnexB(frameData, 4)
                     mediaDecoderManager!!.decodeVideo(annexBFrame, 0)
                 }
             }

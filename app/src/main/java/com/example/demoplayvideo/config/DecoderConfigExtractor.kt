@@ -1,18 +1,13 @@
 package com.example.demoplayvideo.config
 
 import android.media.MediaCodec
-import android.media.MediaCodecInfo
 import android.media.MediaFormat
-import android.os.Build
 import android.util.Base64
 import android.util.Log
-import androidx.annotation.RequiresApi
-import com.example.demoplayvideo.VideoEncoder
 import com.example.demoplayvideo.decoder.AudioDecoderConfig
-import com.example.demoplayvideo.decoder.VideoDecoder
 import com.example.demoplayvideo.decoder.VideoDecoderConfig
 import java.nio.ByteBuffer
-import java.nio.ByteOrder
+import kotlin.collections.take
 
 /**
  * Trích xuất DecoderConfigs từ MediaCodec
@@ -26,12 +21,9 @@ class DecoderConfigExtractor {
     /**
      * Trích xuất video config từ encoder
      */
-    fun extractVideoConfig(
-        codec: MediaCodec,
-        videoConfig: VideoEncoder.VideoEncoderConfig
-    ): VideoDecoderConfig? {
+    fun extractVideoConfig(codec: MediaCodec): VideoDecoderConfig? {
+        val outputFormat = codec.outputFormat
         return try {
-            val outputFormat = codec.outputFormat
             Log.d(TAG, "Converting MediaFormat to VideoConfig...")
             Log.d(TAG, "Input format: $outputFormat")
 
@@ -54,7 +46,7 @@ class DecoderConfigExtractor {
             Log.d(TAG, "CSD hex: ${csd.take(20).joinToString(" ") { "%02x".format(it) }}...")
 
             // Generate codec string
-            val codecString = generateCodecString(mimeType, outputFormat, csd, videoConfig)
+            val codecString = generateCodecString(mimeType, outputFormat, csd)
             Log.d(TAG, "Codec string: $codecString")
 
             // Base64 encode CSD
@@ -75,165 +67,6 @@ class DecoderConfigExtractor {
         } catch (e: Exception) {
             Log.e(TAG, "Error converting format", e)
             null
-        }
-    }
-
-    /**
-     * Extract và combine CSD buffers
-     */
-    private fun extractAndCombineCSD(format: MediaFormat, mimeType: String): ByteArray? {
-        return when {
-            mimeType.contains("avc") -> {
-                // H.264: Combine csd-0 (SPS) và csd-1 (PPS) thành avcC format
-                val csd0 = format.getByteBuffer("csd-0") ?: run {
-                    Log.e(TAG, "No csd-0 for H.264")
-                    return null
-                }
-                val csd1 = format.getByteBuffer("csd-1") ?: run {
-                    Log.e(TAG, "No csd-1 for H.264")
-                    return null
-                }
-                Log.e(TAG, "")
-                combineH264CSD(csd0, csd1)
-            }
-
-            mimeType.contains("hevc") -> {
-                // H.265: csd-0 chứa VPS+SPS+PPS
-                val csd0 = format.getByteBuffer("csd-0") ?: run {
-                    Log.e(TAG, "No csd-0 for H.265")
-                    return null
-                }
-
-                ByteArray(csd0.remaining()).also {
-                    csd0.get(it)
-                    csd0.rewind()
-                }
-            }
-
-            else -> {
-                Log.w(TAG, "Unsupported mime type: $mimeType")
-                null
-            }
-        }
-    }
-
-    /**
-     * Combine H.264 SPS và PPS thành avcC format
-     * avcC structure:
-     * [1] version = 1
-     * [1] profile
-     * [1] compatibility
-     * [1] level
-     * [1] reserved (6 bits) + NAL length size - 1 (2 bits)
-     * [1] reserved (3 bits) + num SPS (5 bits)
-     * [2] SPS length
-     * [n] SPS data
-     * [1] num PPS
-     * [2] PPS length
-     * [m] PPS data
-     */
-    private fun combineH264CSD(spsBuffer: ByteBuffer, ppsBuffer: ByteBuffer): ByteArray {
-        // Extract SPS
-        val sps1 = ByteArray(spsBuffer.remaining())
-        spsBuffer.get(sps1)
-        spsBuffer.rewind()
-        val sps = removeNALStartCode(sps1)
-
-        // Extract PPS
-        val pps1 = ByteArray(ppsBuffer.remaining())
-        ppsBuffer.get(pps1)
-        ppsBuffer.rewind()
-        val pps = removeNALStartCode(pps1)
-
-        // Parse profile, level từ SPS
-        // SPS format: [NAL header][profile][constraint][level]...
-        val profile = if (sps.size > 1) sps[1] else 0x64.toByte() // High profile default
-        val compatibility = if (sps.size > 2) sps[2] else 0x00.toByte()
-        val level = if (sps.size > 3) sps[3] else 0x28.toByte() // Level 4.0
-
-        Log.e(
-            TAG,
-            "H.264 Profile: 0x${profile.toString(16)}, compatibility=${compatibility.toString(16)} Level: 0x${
-                level.toString(16)
-            }"
-        )
-
-        // Build avcC
-        val avcC = ByteArray(11 + sps.size + pps.size)
-        var offset = 0
-
-        // Header
-        avcC[offset++] = 0x01 // version
-        avcC[offset++] = profile
-        avcC[offset++] = compatibility
-        avcC[offset++] = level
-        avcC[offset++] = 0xFF.toByte() // 6 bits reserved (111111) + lengthSizeMinusOne = 3 (11)
-
-        // SPS
-        avcC[offset++] =
-            0xE1.toByte() // 3 bits reserved (111) + numOfSequenceParameterSets = 1 (00001)
-        avcC[offset++] = ((sps.size shr 8) and 0xFF).toByte() // SPS length high byte
-        avcC[offset++] = (sps.size and 0xFF).toByte() // SPS length low byte
-        System.arraycopy(sps, 0, avcC, offset, sps.size)
-        offset += sps.size
-
-        // PPS
-        avcC[offset++] = 0x01 // numOfPictureParameterSets
-        avcC[offset++] = ((pps.size shr 8) and 0xFF).toByte() // PPS length high byte
-        avcC[offset++] = (pps.size and 0xFF).toByte() // PPS length low byte
-        System.arraycopy(pps, 0, avcC, offset, pps.size)
-
-        Log.d(TAG, "avcC created: ${avcC.size} bytes")
-
-        return avcC
-    }
-
-    /**
-     * Generate codec string
-     */
-    private fun generateCodecString(
-        mimeType: String,
-        format: MediaFormat,
-        csd: ByteArray,
-        videoConfig: VideoEncoder.VideoEncoderConfig
-    ): String {
-        return when {
-            mimeType.contains("avc") -> {
-
-                // Lấy profile + level để tạo chuỗi codec (vd: avc1.640028)
-                val profile = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    format.getInteger(MediaFormat.KEY_PROFILE, videoConfig.profile)
-                } else {
-                    videoConfig.profile
-                }
-                val level = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    format.getInteger(MediaFormat.KEY_LEVEL, videoConfig.level)
-                } else {
-                    videoConfig.level
-                }
-                getAvcCodecString(mimeType, profile, level)
-            }
-
-            mimeType.contains("hevc") -> {
-                // hev1.PROFILE.FLAGS.LEVEL.TIER
-                var profile = 1 // Main profile
-                var level = 93 // Level 3.1
-
-                try {
-                    if (format.containsKey(MediaFormat.KEY_PROFILE)) {
-                        profile = format.getInteger(MediaFormat.KEY_PROFILE)
-                    }
-                    if (format.containsKey(MediaFormat.KEY_LEVEL)) {
-                        level = format.getInteger(MediaFormat.KEY_LEVEL)
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Could not get profile/level", e)
-                }
-
-                "hev1.$profile.06.L$level.b0"
-            }
-
-            else -> "avc1.640028"
         }
     }
 
@@ -293,14 +126,6 @@ class DecoderConfigExtractor {
                     ByteArray(buffer.remaining()).also { buffer.get(it) }
                 } ?: return null
                 val opusHead = extractOpusHead(csd0) ?: return null
-                Log.e(
-                    TAG,
-                    "extractAudioCSD opusHead size=${opusHead.size} hex: ${
-                        opusHead.joinToString(" ") {
-                            "%02x".format(it)
-                        }
-                    }..."
-                )
                 return opusHead
             }
 
@@ -351,225 +176,224 @@ class DecoderConfigExtractor {
     }
 
     /**
-     * Generate OpusHead nếu không có CSD
-     *
-     * OpusHead structure (19 bytes minimum):
-     * [8 bytes] "OpusHead" magic signature
-     * [1 byte]  Version (always 1)
-     * [1 byte]  Channel Count
-     * [2 bytes] Pre-skip (little-endian)
-     * [4 bytes] Sample Rate (little-endian)
-     * [2 bytes] Output Gain (little-endian, default 0)
-     * [1 byte]  Channel Mapping Family (0 = mono/stereo)
+     * Extract và combine CSD buffers
      */
-    fun generateOpusHead(sampleRate: Int, channelCount: Int): ByteArray {
-        val buffer = ByteBuffer.allocate(19)
-        buffer.order(ByteOrder.LITTLE_ENDIAN)
+    private fun extractAndCombineCSD(format: MediaFormat, mimeType: String): ByteArray? {
+        return when {
+            mimeType.contains("avc") -> {
+                // H.264: Combine csd-0 (SPS) và csd-1 (PPS) thành avcC format
+                val csd0 = format.getByteBuffer("csd-0") ?: run {
+                    Log.e(TAG, "No csd-0 for H.264")
+                    return null
+                }
+                val csd1 = format.getByteBuffer("csd-1") ?: run {
+                    Log.e(TAG, "No csd-1 for H.264")
+                    return null
+                }
+                combineH264CSD(csd0, csd1)
+            }
 
-        // Magic signature "OpusHead"
-        buffer.put("OpusHead".toByteArray(Charsets.US_ASCII))
-
-        // Version
-        buffer.put(1)
-
-        // Channel count
-        buffer.put(channelCount.toByte())
-
-        // Pre-skip (312 samples for 48kHz, scale for other rates)
-        val preSkip = (312 * sampleRate) / 48000
-        buffer.putShort(preSkip.toShort())
-
-        // Input sample rate (original sample rate)
-        buffer.putInt(sampleRate)
-
-        // Output gain (0 dB)
-        buffer.putShort(0)
-
-        // Channel mapping family (0 for mono/stereo)
-        buffer.put(0)
-
-        val opusHead = buffer.array()
-
-        Log.d(TAG, "Generated OpusHead: ${opusHead.size} bytes")
-        Log.d(TAG, "  Sample Rate: ${sampleRate}Hz")
-        Log.d(TAG, "  Channels: $channelCount")
-        Log.d(TAG, "  Pre-skip: $preSkip")
-
-        return opusHead
-    }
-
-    /**
-     * Generate AVC codec string
-     *
-     * @param mime MIME type (should be video/avc)
-     * @param profile MediaCodecInfo profile constant
-     * @param level MediaCodecInfo level constant
-     * @return codec string (e.g., "avc1.640028")
-     */
-    fun getAvcCodecString(mime: String, profile: Int, level: Int): String {
-        if (!mime.contains("avc")) {
-            Log.w(TAG, "Not an AVC MIME type: $mime")
-            return "avc1.640028" // Default fallback
-        }
-        // Convert MediaCodecInfo constants to hex values
-        val profileHex = getProfileHex(profile)
-        val constraintHex = getConstraintFlags(profile)
-        val levelHex = getLevelHex(level)
-
-        val codecString = "avc1.%02x%02x%02x".format(profileHex, constraintHex, levelHex)
-
-        Log.d(TAG, "Generated codec string: $codecString")
-        return codecString
-    }
-
-    /**
-     * Get profile hex value from MediaCodecInfo constant
-     */
-    private fun getProfileHex(profile: Int): Int {
-        return when (profile) {
-            // Baseline Profile (0x42)
-            MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline -> 0x42
-
-            // Main Profile (0x4D)
-            MediaCodecInfo.CodecProfileLevel.AVCProfileMain -> 0x4D
-
-            // Extended Profile (0x58)
-            MediaCodecInfo.CodecProfileLevel.AVCProfileExtended -> 0x58
-
-            // High Profile (0x64)
-            MediaCodecInfo.CodecProfileLevel.AVCProfileHigh -> 0x64
-
-            // High 10 Profile (0x6E)
-            MediaCodecInfo.CodecProfileLevel.AVCProfileHigh10 -> 0x6E
-
-            // High 4:2:2 Profile (0x7A)
-            MediaCodecInfo.CodecProfileLevel.AVCProfileHigh422 -> 0x7A
-
-            // High 4:4:4 Predictive Profile (0xF4)
-            MediaCodecInfo.CodecProfileLevel.AVCProfileHigh444 -> 0xF4
-
-            // Constrained Baseline (0x42 with constraint set 1)
-            MediaCodecInfo.CodecProfileLevel.AVCProfileConstrainedBaseline -> 0x42
-
-            // Constrained High (0x64 with constraints)
-            MediaCodecInfo.CodecProfileLevel.AVCProfileConstrainedHigh -> 0x64
+            mimeType.contains("hevc") -> {
+                // H.265: csd-0 chứa VPS+SPS+PPS
+                val csd0 = format.getByteBuffer("csd-0") ?: run {
+                    Log.e(TAG, "No csd-0 for H.265")
+                    return null
+                }
+                val csd = ByteArray(csd0.remaining()).also {
+                    csd0.get(it)
+                    csd0.rewind()
+                }
+                HevcCsdConverter.convertAnnexBToHvcCsd(csd)
+            }
 
             else -> {
-                Log.w(TAG, "Unknown profile: $profile, using High (0x64)")
-                0x64
+                Log.w(TAG, "Unsupported mime type: $mimeType")
+                null
             }
         }
     }
 
     /**
-     * Get constraint flags based on profile
-     *
-     * Constraint flags (8 bits):
-     * - Bit 7 (0x80): Reserved (always 0)
-     * - Bit 6 (0x40): constraint_set0_flag (Baseline)
-     * - Bit 5 (0x20): constraint_set1_flag (Main)
-     * - Bit 4 (0x10): constraint_set2_flag (Extended)
-     * - Bit 3 (0x08): constraint_set3_flag (High)
-     * - Bit 2 (0x04): constraint_set4_flag
-     * - Bit 1 (0x02): constraint_set5_flag
-     * - Bit 0 (0x01): Reserved (always 0)
+     * Combine H.264 SPS và PPS thành avcC format
+     * avcC structure:
+     * [1] version = 1
+     * [1] profile
+     * [1] compatibility
+     * [1] level
+     * [1] reserved (6 bits) + NAL length size - 1 (2 bits)
+     * [1] reserved (3 bits) + num SPS (5 bits)
+     * [2] SPS length
+     * [n] SPS data
+     * [1] num PPS
+     * [2] PPS length
+     * [m] PPS data
      */
-    private fun getConstraintFlags(profile: Int): Int {
-        return when (profile) {
-            // Constrained Baseline: Sets constraint_set0_flag (0x40) and constraint_set1_flag (0x20)
-            MediaCodecInfo.CodecProfileLevel.AVCProfileConstrainedBaseline -> 0xC0
+    private fun combineH264CSD(spsBuffer: ByteBuffer, ppsBuffer: ByteBuffer): ByteArray {
+        // Extract SPS
+        val sps = ByteArray(spsBuffer.remaining())
+        spsBuffer.get(sps)
+        spsBuffer.rewind()
 
-            // Constrained High: Sets constraint_set4_flag and constraint_set5_flag
-            MediaCodecInfo.CodecProfileLevel.AVCProfileConstrainedHigh -> 0x0C
+        // Extract PPS
+        val pps = ByteArray(ppsBuffer.remaining())
+        ppsBuffer.get(pps)
+        ppsBuffer.rewind()
 
-            // Baseline: constraint_set0_flag (0x40)
-            MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline -> 0x00
+        Log.d(TAG, "SPS size: ${sps.size}, PPS size: ${pps.size}")
+        Log.d(TAG, "SPS hex: ${sps.take(10).joinToString(" ") { "%02x".format(it) }}")
+        Log.d(TAG, "PPS hex: ${pps.take(10).joinToString(" ") { "%02x".format(it) }}")
 
-            // Main: constraint_set1_flag (0x20)
-            MediaCodecInfo.CodecProfileLevel.AVCProfileMain -> 0x00
+        // ⚠️ QUAN TRỌNG: Check nếu SPS/PPS có NAL start code (00 00 00 01 hoặc 00 00 01)
+        // Nếu có thì bỏ start code đi
+        val cleanSPS = removeNALStartCode(sps)
+        val cleanPPS = removeNALStartCode(pps)
+//        val cleanSPS = sps
+//        val cleanPPS = pps
 
-            // Extended: constraint_set2_flag (0x10)
-            MediaCodecInfo.CodecProfileLevel.AVCProfileExtended -> 0x00
+        Log.d(TAG, "Clean SPS size: ${cleanSPS.size}, Clean PPS size: ${cleanPPS.size}")
 
-            // High profiles: Usually no constraint flags
-            MediaCodecInfo.CodecProfileLevel.AVCProfileHigh,
-            MediaCodecInfo.CodecProfileLevel.AVCProfileHigh10,
-            MediaCodecInfo.CodecProfileLevel.AVCProfileHigh422,
-            MediaCodecInfo.CodecProfileLevel.AVCProfileHigh444 -> 0x00
+        // Parse profile, level từ SPS (sau NAL header)
+        // SPS NAL format: [NAL type byte][profile][constraint][level]...
+        var profile = 0x64 // High profile default
+        var compatibility = 0x00
+        var level = 0x28 // Level 4.0 default
 
-            else -> 0x00
+        if (cleanSPS.size >= 4) {
+            // Skip NAL header byte (index 0), lấy profile/constraint/level
+            profile = cleanSPS[1].toInt() and 0xFF
+            compatibility = cleanSPS[2].toInt() and 0xFF
+            level = cleanSPS[3].toInt() and 0xFF
+
+            Log.d(TAG, "Parsed from SPS: profile=0x${profile.toString(16)}, compatibility=0x${compatibility.toString(16)}, level=0x${level.toString(16)}")
+        } else {
+            Log.w(TAG, "SPS too short (${cleanSPS.size} bytes), using defaults")
+        }
+
+        // Build avcC
+        val avcC = ByteArray(11 + cleanSPS.size + cleanPPS.size)
+        var offset = 0
+
+        // Header
+        avcC[offset++] = 0x01 // version
+        avcC[offset++] = profile.toByte()
+        avcC[offset++] = compatibility.toByte()
+        avcC[offset++] = level.toByte()
+        avcC[offset++] = 0xFF.toByte() // 6 bits reserved (111111) + lengthSizeMinusOne = 3 (11)
+
+        // SPS
+        avcC[offset++] = 0xE1.toByte() // 3 bits reserved (111) + numOfSequenceParameterSets = 1 (00001)
+        avcC[offset++] = ((cleanSPS.size shr 8) and 0xFF).toByte() // SPS length high byte
+        avcC[offset++] = (cleanSPS.size and 0xFF).toByte() // SPS length low byte
+        System.arraycopy(cleanSPS, 0, avcC, offset, cleanSPS.size)
+        offset += cleanSPS.size
+
+        // PPS
+        avcC[offset++] = 0x01 // numOfPictureParameterSets
+        avcC[offset++] = ((cleanPPS.size shr 8) and 0xFF).toByte() // PPS length high byte
+        avcC[offset++] = (cleanPPS.size and 0xFF).toByte() // PPS length low byte
+        System.arraycopy(cleanPPS, 0, avcC, offset, cleanPPS.size)
+
+        Log.d(TAG, "avcC created: ${avcC.size} bytes")
+        Log.d(TAG, "avcC header: ${avcC.take(11).joinToString(" ") { "%02x".format(it) }}")
+
+        return avcC
+    }
+
+    /**
+     * Generate codec string
+     */
+    private fun generateCodecString(mimeType: String, format: MediaFormat, csd: ByteArray): String {
+        return when {
+            mimeType.contains("avc") -> {
+                // avc1.PPCCLL
+                // CSD format: [version][profile][compatibility][level][...]
+
+                var profile = 0x64 // High profile default
+                var constraint = 0x00
+                var level = 0x28 // Level 4.0 default
+
+                // Parse từ avcC header
+                if (csd.size >= 4) {
+                    // avcC format: [1:version][1:profile][1:compatibility][1:level]...
+                    profile = csd[1].toInt() and 0xFF
+                    constraint = csd[2].toInt() and 0xFF
+                    level = csd[3].toInt() and 0xFF
+
+                    Log.d(TAG, "H.264 codec string from CSD:")
+                    Log.d(TAG, "  Profile: 0x${profile.toString(16).padStart(2, '0')} (${getH264ProfileName(profile)})")
+                    Log.d(TAG, "  Constraint: 0x${constraint.toString(16).padStart(2, '0')}")
+                    Log.d(TAG, "  Level: 0x${level.toString(16).padStart(2, '0')} (${getH264LevelName(level)})")
+                } else {
+                    Log.w(TAG, "CSD too short for H.264: ${csd.size} bytes, using defaults")
+                }
+
+                val codecString = "avc1.%02x%02x%02x".format(profile, constraint, level)
+                Log.d(TAG, "Generated codec string: $codecString")
+
+                codecString
+            }
+
+            mimeType.contains("hevc") -> {
+                // hev1.PROFILE.FLAGS.LEVEL.TIER
+                var profile = 1 // Main profile
+                var level = 93 // Level 3.1
+
+                try {
+                    if (format.containsKey(MediaFormat.KEY_PROFILE)) {
+                        profile = format.getInteger(MediaFormat.KEY_PROFILE)
+                    }
+                    if (format.containsKey(MediaFormat.KEY_LEVEL)) {
+                        level = format.getInteger(MediaFormat.KEY_LEVEL)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not get profile/level", e)
+                }
+
+                "hev1.$profile.06.L$level.b0"
+            }
+
+            else -> "avc1.640028"
         }
     }
 
     /**
-     * Get level hex value from MediaCodecInfo constant
+     * Get H.264 profile name for debugging
      */
-    private fun getLevelHex(level: Int): Int {
+    private fun getH264ProfileName(profile: Int): String {
+        return when (profile) {
+            0x42 -> "Baseline"
+            0x4D -> "Main"
+            0x58 -> "Extended"
+            0x64 -> "High"
+            0x6E -> "High 10"
+            0x7A -> "High 4:2:2"
+            0xF4 -> "High 4:4:4"
+            else -> "Unknown"
+        }
+    }
+
+    /**
+     * Get H.264 level name for debugging
+     */
+    private fun getH264LevelName(level: Int): String {
         return when (level) {
-            // Level 1
-            MediaCodecInfo.CodecProfileLevel.AVCLevel1 -> 0x0A
-
-            // Level 1b
-            MediaCodecInfo.CodecProfileLevel.AVCLevel1b -> 0x09
-
-            // Level 1.1
-            MediaCodecInfo.CodecProfileLevel.AVCLevel11 -> 0x0B
-
-            // Level 1.2
-            MediaCodecInfo.CodecProfileLevel.AVCLevel12 -> 0x0C
-
-            // Level 1.3
-            MediaCodecInfo.CodecProfileLevel.AVCLevel13 -> 0x0D
-
-            // Level 2
-            MediaCodecInfo.CodecProfileLevel.AVCLevel2 -> 0x14
-
-            // Level 2.1
-            MediaCodecInfo.CodecProfileLevel.AVCLevel21 -> 0x15
-
-            // Level 2.2
-            MediaCodecInfo.CodecProfileLevel.AVCLevel22 -> 0x16
-
-            // Level 3
-            MediaCodecInfo.CodecProfileLevel.AVCLevel3 -> 0x1E
-
-            // Level 3.1
-            MediaCodecInfo.CodecProfileLevel.AVCLevel31 -> 0x1F
-
-            // Level 3.2
-            MediaCodecInfo.CodecProfileLevel.AVCLevel32 -> 0x20
-
-            // Level 4
-            MediaCodecInfo.CodecProfileLevel.AVCLevel4 -> 0x28
-
-            // Level 4.1
-            MediaCodecInfo.CodecProfileLevel.AVCLevel41 -> 0x29
-
-            // Level 4.2
-            MediaCodecInfo.CodecProfileLevel.AVCLevel42 -> 0x2A
-
-            // Level 5
-            MediaCodecInfo.CodecProfileLevel.AVCLevel5 -> 0x32
-
-            // Level 5.1
-            MediaCodecInfo.CodecProfileLevel.AVCLevel51 -> 0x33
-
-            // Level 5.2
-            MediaCodecInfo.CodecProfileLevel.AVCLevel52 -> 0x34
-
-            // Level 6.0 (Android 11+)
-            MediaCodecInfo.CodecProfileLevel.AVCLevel6 -> 0x3C
-
-            // Level 6.1 (Android 11+)
-            MediaCodecInfo.CodecProfileLevel.AVCLevel61 -> 0x3D
-
-            // Level 6.2 (Android 11+)
-            MediaCodecInfo.CodecProfileLevel.AVCLevel62 -> 0x3E
-
-            else -> {
-                Log.w(TAG, "Unknown level: $level, using Level 4.0 (0x28)")
-                0x28
-            }
+            0x0A -> "1.0"
+            0x0B -> "1.1"
+            0x0C -> "1.2"
+            0x0D -> "1.3"
+            0x14 -> "2.0"
+            0x15 -> "2.1"
+            0x16 -> "2.2"
+            0x1E -> "3.0"
+            0x1F -> "3.1"
+            0x20 -> "3.2"
+            0x28 -> "4.0"
+            0x29 -> "4.1"
+            0x2A -> "4.2"
+            0x32 -> "5.0"
+            0x33 -> "5.1"
+            0x34 -> "5.2"
+            else -> "Unknown (0x${level.toString(16)})"
         }
     }
 
@@ -596,4 +420,5 @@ class DecoderConfigExtractor {
             else -> data
         }
     }
+
 }

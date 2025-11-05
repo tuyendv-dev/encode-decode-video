@@ -155,8 +155,8 @@ class VideoEncoder(
                                 if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
                                     Log.d(TAG, "Received codec config data: ${bufferInfo.size} bytes")
                                     // Lưu config để gửi cùng với keyframe đầu tiên
-                                }
 
+                                }
                                 // Copy data
                                 buffer.position(bufferInfo.offset)
                                 buffer.limit(bufferInfo.offset + bufferInfo.size)
@@ -175,15 +175,13 @@ class VideoEncoder(
                                     firstFrameTimeUs = bufferInfo.presentationTimeUs
                                 }
                                 val timestamp = (bufferInfo.presentationTimeUs - firstFrameTimeUs) / 1000 // ms
-                                val avcc = annexBToAvcc(data)
+                                val avcc = annexBToAvccOrHvcc(data)
                                 val frame = EncodedFrame(
                                     data = avcc,
                                     isKeyFrame = isKeyFrame,
                                     timestamp = timestamp,
                                     flags = bufferInfo.flags
                                 )
-//                                Log.e(TAG, "startEncoding: frameIndex=$frameIndex size=${dataFrames.size} data=${data.size} isKeyFrame=$isKeyFrame timestamp=${timestamp}", )
-//                                prettyHexDump(data)
                                 onFrameEncoded(frame)
                                 frameIndex++
                             }
@@ -213,7 +211,7 @@ class VideoEncoder(
         }
     }
 
-    fun annexBToAvcc(annexB: ByteArray): ByteArray {
+    fun annexBToAvccOrHvcc(annexB: ByteArray): ByteArray {
         val input = ByteBuffer.wrap(annexB)
         val output = ByteArrayOutputStream()
 
@@ -324,7 +322,6 @@ class VideoEncoder(
             codec?.setParameters(
                 Bundle().apply {
                     putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, config.bitrate)
-//                    putFloat(MediaCodec.PARAMETER_KEY_FRAME_RATE, newFrameRate.toFloat())
                 }
             )
             Log.d(TAG, "Frame rate adjusted to: $newFrameRate fps")
@@ -408,7 +405,7 @@ class AudioEncoder(
                 config.channelCount
             ).apply {
                 setInteger(MediaFormat.KEY_BIT_RATE, config.bitrate)
-                setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
+                setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384) // 16 KB
 
                 if (config.codec == CodecType.AAC) {
                     setInteger(

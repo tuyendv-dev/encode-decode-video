@@ -1,11 +1,9 @@
 package com.example.demoplayvideo
 
 import android.media.MediaCodec
-import android.media.MediaFormat
 import android.util.Log
 import android.view.Surface
 import com.example.demoplayvideo.config.DecoderConfigExtractor
-import com.example.demoplayvideo.config.MediaFormatConverter
 import com.example.demoplayvideo.decoder.AudioDecoderConfig
 import com.example.demoplayvideo.decoder.DecoderConfigs
 import com.example.demoplayvideo.decoder.VideoDecoderConfig
@@ -97,10 +95,7 @@ class LiveStreamManager(
                 delay(100)
                 // Trích xuất video config
                 videoEncoder?.codec?.let { codec ->
-                    videoDecoderConfig = configExtractor.extractVideoConfig(
-                        codec,
-                        videoConfig
-                    )
+                    videoDecoderConfig = configExtractor.extractVideoConfig(codec)
                 }
                 // Trích xuất audio config
                 audioEncoder?.codec?.let { codec ->
@@ -150,9 +145,5 @@ class LiveStreamManager(
         audioEncoder?.release()
         Log.d(TAG, "Live stream released")
     }
-
-
-
-
 
 }

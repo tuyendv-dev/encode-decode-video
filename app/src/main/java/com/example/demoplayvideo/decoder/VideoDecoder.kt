@@ -10,6 +10,7 @@ import android.media.MediaFormat
 import android.util.Base64
 import android.util.Log
 import android.view.Surface
+import com.example.demoplayvideo.config.HevcCsdConverter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -80,15 +81,16 @@ class VideoDecoder(
                     mimeType == MediaFormat.MIMETYPE_VIDEO_AVC -> {
                         // H.264/AVC: Tách SPS và PPS
                         val (sps, pps) = extractAvcCsd(csdData)
-//                        setByteBuffer("csd-0", ByteBuffer.wrap(sps))
-//                        setByteBuffer("csd-1", ByteBuffer.wrap(pps))
-                        setByteBuffer("csd-0", ByteBuffer.wrap(convertCsdToAnnexB(sps)))
-                        setByteBuffer("csd-1", ByteBuffer.wrap(convertCsdToAnnexB(pps)))
+                        setByteBuffer("csd-0", ByteBuffer.wrap(convertCsdAvcToAnnexB(sps)))
+                        setByteBuffer("csd-1", ByteBuffer.wrap(convertCsdAvcToAnnexB(pps)))
                     }
 
                     mimeType == MediaFormat.MIMETYPE_VIDEO_HEVC -> {
                         // H.265/HEVC: Set CSD-0
-                        setByteBuffer("csd-0", ByteBuffer.wrap(csdData))
+                        setByteBuffer(
+                            "csd-0",
+                            ByteBuffer.wrap(HevcCsdConverter.hevcCsdToAnnexB(csdData))
+                        )
                     }
                 }
 
@@ -156,7 +158,7 @@ class VideoDecoder(
         return Pair(sps, pps)
     }
 
-    fun convertCsdToAnnexB(csd: ByteArray): ByteArray {
+    fun convertCsdAvcToAnnexB(csd: ByteArray): ByteArray {
         val startCode = byteArrayOf(0x00, 0x00, 0x00, 0x01)
         val output = ByteArrayOutputStream()
 
@@ -412,11 +414,15 @@ class AudioDecoder(
             val pcm = wrapper.decode(encodedData)
             if (pcm.isNotEmpty()) {
                 try {
-                    val written = audioTrack?.write(pcm, 0, pcm.size, AudioTrack.WRITE_BLOCKING) ?: 0
+                    val written =
+                        audioTrack?.write(pcm, 0, pcm.size, AudioTrack.WRITE_BLOCKING) ?: 0
                     if (written < 0) {
                         Log.e(TAG, "AudioTrack write error (opus): $written")
                     } else if (written != pcm.size) {
-                        Log.w(TAG, "AudioTrack underrun (opus): written=$written, expected=${pcm.size}")
+                        Log.w(
+                            TAG,
+                            "AudioTrack underrun (opus): written=$written, expected=${pcm.size}"
+                        )
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error writing opus PCM to AudioTrack", e)
