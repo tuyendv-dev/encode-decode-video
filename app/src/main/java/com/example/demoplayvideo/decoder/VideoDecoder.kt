@@ -32,7 +32,8 @@ data class VideoDecoderConfig(
     val codedWidth: Int,
     val codedHeight: Int,
     val frameRate: Int,
-    val description: String
+    val description: String,
+    val orientation: Int = 0,
 )
 
 data class AudioDecoderConfig(
@@ -99,6 +100,8 @@ class VideoDecoder(
                     MediaFormat.KEY_COLOR_FORMAT,
                     MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
                 )
+                // ✅ FIX ORIENTATION
+                setInteger(MediaFormat.KEY_ROTATION, config.orientation)
             }
 
             codec?.configure(format, surface, null, 0)

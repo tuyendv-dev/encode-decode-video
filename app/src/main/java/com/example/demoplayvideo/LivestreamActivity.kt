@@ -1,9 +1,11 @@
 package com.example.demoplayvideo
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
@@ -11,12 +13,16 @@ import android.hardware.camera2.CaptureRequest
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Build
 import android.os.Bundle
+import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.TextureView
+import android.view.WindowInsets
+import android.view.WindowManager
 import android.widget.Button
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
@@ -24,6 +30,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
+import com.example.demoplayvideo.config.VideoAspectRatioFixer
 import com.example.demoplayvideo.decoder.AudioDecoderConfig
 import com.example.demoplayvideo.decoder.DecoderConfigs
 import com.example.demoplayvideo.decoder.MediaDecoderManager
@@ -47,6 +54,8 @@ class LivestreamActivity : AppCompatActivity() {
 
     private lateinit var textureView: TextureView
     private lateinit var remoteView: SurfaceView
+    private var remoteViewWidth: Int = 0
+    private var remoteViewHeight: Int = 0
     private lateinit var streamManager: LiveStreamManager
     private var mediaDecoderManager: MediaDecoderManager? = null
     private lateinit var webSocket: WebSocket
@@ -55,6 +64,8 @@ class LivestreamActivity : AppCompatActivity() {
     private var captureSession: CameraCaptureSession? = null
     private var audioRecord: AudioRecord? = null
     private var audioRecordJob: Job? = null
+    private lateinit var cameraManager: CameraManager
+    private var videoOrientation: Int = 0
 
     companion object {
         private const val TAG = "LiveStreamActivity"
@@ -81,7 +92,9 @@ class LivestreamActivity : AppCompatActivity() {
         setupWebSocket()
         remoteView.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
-                setupLiveStream()
+                remoteViewWidth = remoteView.width
+                remoteViewHeight = remoteView.height
+//                setupLiveStream()
             }
 
             override fun surfaceChanged(
@@ -160,12 +173,24 @@ class LivestreamActivity : AppCompatActivity() {
     }
 
     private fun setupDecoder(decoderConfigs: DecoderConfigs) {
+        mediaDecoderManager?.release()
         mediaDecoderManager = MediaDecoderManager(
             decoderConfigs = decoderConfigs,
             videoSurface = remoteView.holder.surface,
             scope = lifecycleScope,
         )
         mediaDecoderManager!!.initialize()
+        remoteView.post {
+            VideoAspectRatioFixer.applySizeToSurfaceView(
+                remoteView,
+                remoteViewWidth,
+                remoteViewHeight,
+                decoderConfigs.videoConfig!!.codedWidth,
+                decoderConfigs.videoConfig.codedHeight,
+                decoderConfigs.videoConfig.orientation
+            )
+        }
+
     }
 
     private fun sendToServer(data: ByteArray, isVideo: Boolean, timestamp: Long) {
@@ -178,8 +203,7 @@ class LivestreamActivity : AppCompatActivity() {
         val bytes = ByteString.of(*packet)
 
         // Gửi bytes qua WebSocket
-        val send = webSocket.send(bytes)
-//        Log.e(TAG, "sendToServer: sendStatus=$send timestamp=$timestamp data=${data.size} send:${bytes.size}")
+        webSocket.send(bytes)
 
         //Decoder
 //        val dataGet = bytes.toByteArray()
@@ -190,10 +214,9 @@ class LivestreamActivity : AppCompatActivity() {
 //        buffer.get(frameData)
 //
 //        if (frameType.toInt() == 2) {
-////            mediaDecoderManager?.decodeAudio(frameData, 0)
-//            opusAudioPlayer?.playFrame(frameData)
+//            mediaDecoderManager?.decodeAudio(frameData, 0)
 //        } else {
-//            val annexBFrame: ByteArray = convertAvcCToAnnexB(frameData, 4)
+//            val annexBFrame: ByteArray = convertAvccOrHvccToAnnexB(frameData, 4)
 //            Log.e(
 //                TAG,
 //                "getToServer: timestamp=$timestampGet type=${frameType.toInt()} frameData=${frameData.size} annexBFrame=${annexBFrame.size}",
@@ -224,8 +247,8 @@ class LivestreamActivity : AppCompatActivity() {
     }
 
     private fun openCamera() {
-        val manager = getSystemService(CAMERA_SERVICE) as CameraManager
-        val cameraId = manager.cameraIdList[0] // Back camera
+        cameraManager = getSystemService(CAMERA_SERVICE) as CameraManager
+        val cameraId = cameraManager.cameraIdList[0] // Back camera
 
         try {
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
@@ -234,7 +257,7 @@ class LivestreamActivity : AppCompatActivity() {
                 return
             }
 
-            manager.openCamera(cameraId, object : CameraDevice.StateCallback() {
+            cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {
                     cameraDevice = camera
                     createCaptureSession()
@@ -291,6 +314,22 @@ class LivestreamActivity : AppCompatActivity() {
         previewSurface: Surface,
         encoderSurface: Surface
     ) {
+        val characteristics = cameraManager.getCameraCharacteristics(cameraDevice!!.id)//cameraManager.getCameraCharacteristics(cameraId)
+        val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION)!!
+        Log.d(TAG, "startPreview: sensorOrientation=${sensorOrientation}")
+        val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val rotation = windowManager.defaultDisplay.rotation
+        Log.d(TAG, "startPreview: rotation=${rotation}")
+        val deviceRotation = when (rotation) {
+            Surface.ROTATION_0 -> 0
+            Surface.ROTATION_90 -> 90
+            Surface.ROTATION_180 -> 180
+            Surface.ROTATION_270 -> 270
+            else -> 0
+        }
+        Log.d(TAG, "startPreview: deviceRotation=${deviceRotation}")
+        videoOrientation = (sensorOrientation - deviceRotation + 360) % 360
+        Log.d(TAG, "startPreview: jpegOrientation=${videoOrientation}")
         try {
             val captureRequest =
                 cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)?.apply {
@@ -304,6 +343,10 @@ class LivestreamActivity : AppCompatActivity() {
                         CaptureRequest.CONTROL_AF_MODE,
                         CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
                     )
+// ✅ FIX ORIENTATION
+//                    set(CaptureRequest.JPEG_ORIENTATION, 270)
+//                    set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+//                        CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON)
                 }?.build()
 
             captureRequest?.let {
@@ -390,6 +433,7 @@ class LivestreamActivity : AppCompatActivity() {
                     codedHeight = videoConfigJSON.getInt("codedHeight"),
                     frameRate = videoConfigJSON.getInt("frameRate"),
                     description = videoConfigJSON.getString("description"),
+                    orientation = videoConfigJSON.getInt("orientation"),
                 )
                 val audioConfigJSON = json.getJSONObject("audioConfig")
                 val audioConfig = AudioDecoderConfig(
@@ -422,6 +466,7 @@ class LivestreamActivity : AppCompatActivity() {
                     put("codedHeight", video.codedHeight)
                     put("frameRate", video.frameRate)
                     put("description", video.description)
+                    put("orientation", videoOrientation)
                 })
             }
             configs.audioConfig?.let { audio ->
@@ -443,8 +488,8 @@ class LivestreamActivity : AppCompatActivity() {
         val request = Request.Builder()
 //            .url("wss://streaming.ermis.network/stream-gate/software/Ermis-streaming/a5d7a087-4c87-429c-9983-39189ef94829")
 //            .url("wss://streaming.ermis.network/stream-gate/software/Ermis-streaming/941b688c-cd0e-4e25-8975-e84e28c50029")
-            .url("wss://4044.bandia.vn/publish/12345678901")
-//            .url("wss://4044.bandia.vn/consume/12345678901")
+//            .url("wss://4044.bandia.vn/publish/12345678901")
+            .url("wss://4044.bandia.vn/consume/12345678901")
 //            .url("wss://streaming.ermis.network/stream-gate/browser/Ermis-streaming/43fa06de-0e8e-4955-9ec8-daef6796634d")
             .build()
 
