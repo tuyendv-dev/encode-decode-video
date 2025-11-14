@@ -69,12 +69,10 @@ dependencies {
     implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.constraintlayout)
     implementation(libs.okhttp)
-    // ExoPlayer core
-    implementation(libs.androidx.media3.exoplayer)
-    // Giao diện UI player (nếu bạn dùng PlayerView)
-    implementation(libs.androidx.media3.ui)
-    // Nếu bạn phát HLS (m3u8)
-    implementation(libs.androidx.media3.exoplayer.hls)
-    // (Tuỳ chọn) Adaptive streaming DASH, SmoothStreaming...
-    implementation(libs.androidx.media3.exoplayer.dash)
+
+    implementation("net.java.dev.jna:jna:5.13.0@aar") {
+        artifact {
+            type = "aar"
+        }
+    }
 }

@@ -2,20 +2,26 @@ package com.example.demoplayvideo.decoder
 
 import android.os.Bundle
 import android.util.Log
-import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.widget.Button
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
-import com.example.demoplayvideo.decoder.MediaSourceModule
+import com.example.demoplayvideo.ErmisCallEndpoint
 import com.example.demoplayvideo.R
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlin.random.Random
 
 class MainActivity : AppCompatActivity() {
+    private val TAG = "MainActivity"
+//    private val endpoint = ErmisCallEndpoint(listOf("https://test-iroh.ermis.network.:8443"))
 
     private lateinit var surfaceView: SurfaceView
-    private lateinit var mediaSourceModule: MediaSourceModule
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -27,30 +33,25 @@ class MainActivity : AppCompatActivity() {
             insets
         }
         surfaceView = findViewById(R.id.surfaceView)
-        val holder = surfaceView.holder
-        holder.addCallback(object : SurfaceHolder.Callback {
-            override fun surfaceCreated(holder: SurfaceHolder) {
-                Log.e("MainActivity", "holder.addCallback Surface created!")
-                mediaSourceModule = MediaSourceModule(holder, lifecycleScope)
-                mediaSourceModule.startWebSocket()
-
-//                demoSource = DemoSource(holder)
-//                demoSource.startWebSocket()
-            }
-
-            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-                Log.e("MainActivity", "holder.addCallback Surface changed: $width x $height")
-            }
-
-            override fun surfaceDestroyed(holder: SurfaceHolder) {
-                Log.e("MainActivity", "holder.addCallback Surface destroyed!")
-            }
-        })
+        val btnSend: Button = findViewById(R.id.btnSend)
+        btnSend.setOnClickListener {
+            sendData()
+        }
+        lifecycleScope.launch {
+//            serverMode()
+            clientMode("hfHHSB5xNNOSjwmPWnEei/nccZxCTTYEKz3ORvqN8HQDCgYmaHR0cHM6Ly90ZXN0LWlyb2guZXJtaXMubmV0d29yay46ODQ0My8AAMDeqPxEHmThAK2erZ4=")
+        }
     }
 
-    override fun onDestroy() {
-        mediaSourceModule.stopWebSocket()
-//        demoSource.stopWebSocket()
-        super.onDestroy()
+    private fun sendData() {
+
+    }
+
+    suspend fun serverMode() = withContext(Dispatchers.IO) {
+
+    }
+
+    suspend fun clientMode(serverAddr: String) = withContext(Dispatchers.IO) {
+
     }
 }

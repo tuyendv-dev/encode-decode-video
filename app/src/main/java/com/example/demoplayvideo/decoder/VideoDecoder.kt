@@ -651,7 +651,7 @@ class MediaDecoderManager(
             videoDecoder = VideoDecoder(config, videoSurface, maxInitDecoder).apply {
                 initialize()
                 startRendering(scope) { pts ->
-                    Log.d("MediaDecoder", "Frame rendered at $pts us")
+
                 }
             }
         }

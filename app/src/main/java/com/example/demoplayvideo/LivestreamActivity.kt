@@ -13,15 +13,12 @@ import android.hardware.camera2.CaptureRequest
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
-import android.os.Build
 import android.os.Bundle
-import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.TextureView
-import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.Button
 import androidx.activity.enableEdgeToEdge
@@ -37,8 +34,10 @@ import com.example.demoplayvideo.decoder.MediaDecoderManager
 import com.example.demoplayvideo.decoder.VideoDecoderConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -49,6 +48,7 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.TimeUnit
 
 class LivestreamActivity : AppCompatActivity() {
 
@@ -66,6 +66,40 @@ class LivestreamActivity : AppCompatActivity() {
     private var audioRecordJob: Job? = null
     private lateinit var cameraManager: CameraManager
     private var videoOrientation: Int = 0
+
+
+    //    val videoCodec = "hev1.1.06.L93.b0"
+    private val videoA53 = "ASFgAAADAAADAAADAPAA/P34+AAADwOgAAEAGEABDAH//yFgAAADAAADAAADAAADAHgsCaEAAQAjQgEBIWAAAAMAAAMAAAMAAAMAeKACgIAtFotJcEu5qAgICASiAAEACEQBwGYrA7GQ"
+    private val videoServer = "AQFgAAADALAAAAMAAPAA/P7/+AAADwOgAAEAF0ABDAH//wFgAAADALAAAAMAAAMAXfAkoQABACZCAQEBYAAAAwCwAAADAAADAF2gAoCALh8Tl+5MlqSgICAgXaFCUKIAAQAKRAHA4w8JQe9hCA=="
+    private val videoIos= "AQFgAAAAsAAAAAAAePAA/P34+AAACwOgAAEAGEABDAH//wFgAAADALAAAAMAAAMAeBcCQKEAAQApQgEBAWAAAAMAsAAAAwAAAwB4oAPAgBEHy4gXuRZFL/y5/E/qbgQEBAGiAAEAB0QBwHLwUyQ="
+    private val videoVivo = "ASFgAAADALAAAAMAAPAA/P7/+AAADwOgAAEAF0ABDAH//yFgAAADALAAAAMAAAMAXfAkoQABACZCAQEhYAAAAwCwAAADAAADAF2gAoCALh8Tl+5MlqagoMCgXaFCUKIAAQAIRAHB4w8DsIQ="
+    private val videoOneP = "ASFgAAADALAAAAMAAPAA/P37+gAADwOgAAEAF0ABDAH//yFgAAADALAAAAMAAAMAeKwJoQABACRCAQEhYAAAAwCwAAADAAADAHigAoCALR/lrSSUku8AbgoCCgGiAAEAB0QBwXPA7CE="
+    private val isServer = 2
+    private val andressServer = "C1E62bSSQBXKCQLtB5BE06xdvsIwbwaUjBDajrbjny0DCgYmaHR0cHM6Ly90ZXN0LWlyb2guZXJtaXMubmV0d29yay46ODQ0My8AAMDeqPxEHifhAMSGxIY="
+    private var sizeByte = 50
+    private var count = 1
+    private var canSend = false
+    private val endpoint = if (isServer != 1) ErmisCallEndpoint(relayUrls = listOf("https://test-iroh.ermis.network.:8443"), secretKey = null) else ErmisCallEndpoint(relayUrls = listOf("https://test-iroh.ermis.network.:8443"), secretKey = ByteArray(32) { 12 })
+
+
+    private val decoderConfigs = DecoderConfigs(
+        type = "DecoderConfigs",
+        videoConfig = VideoDecoderConfig(
+            codec = if (isServer == 1) "hev1.1.06.L1879048452.b0" else "hev1.1.06.L2048.b0",
+            codedWidth = 1280,
+            codedHeight = 720,
+            frameRate = 30,
+            description = if (isServer == 1) videoA53 else videoVivo,
+//            description = videoIos,
+            orientation = 270
+        ),
+        audioConfig = AudioDecoderConfig(
+            sampleRate = 48000,
+            numberOfChannels = 1,
+            codec = "opus",
+            description = "T3B1c0hlYWQBATgBgLsAAAAAAA=="
+        )
+    )
 
     companion object {
         private const val TAG = "LiveStreamActivity"
@@ -89,12 +123,30 @@ class LivestreamActivity : AppCompatActivity() {
         remoteView = findViewById<SurfaceView>(R.id.remoteView)
         val btnPhat = findViewById<Button>(R.id.btnPhat)
         val btnXem = findViewById<Button>(R.id.btnXem)
-        setupWebSocket()
+        btnPhat.setOnClickListener {
+            canSend = true
+//            sendData("Connected".toByteArray())
+        }
+        btnXem.setOnClickListener {
+            if (isServer != 1) {
+                xemVideo()
+            }
+//            lifecycleScope.launch {
+//                withContext(Dispatchers.IO) {
+//                        while (true) {
+//                            delay(200)
+//                            sendData(ByteArray(sizeByte * count))
+//                            count ++
+//                    }
+//                }
+//            }
+        }
+//        setupWebSocket()
         remoteView.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
                 remoteViewWidth = remoteView.width
                 remoteViewHeight = remoteView.height
-//                setupLiveStream()
+                setupLiveStream()
             }
 
             override fun surfaceChanged(
@@ -108,6 +160,14 @@ class LivestreamActivity : AppCompatActivity() {
             override fun surfaceDestroyed(holder: SurfaceHolder) {
             }
         })
+
+        lifecycleScope.launch {
+            if (isServer == 1) {
+                serverMode()
+            } else {
+                clientMode(andressServer)
+            }
+        }
     }
 
     private fun setupLiveStream() {
@@ -122,25 +182,23 @@ class LivestreamActivity : AppCompatActivity() {
 //        val audioConfig = EncoderPresets.AUDIO_HIGH
 //        val audioConfig = EncoderPresets.AUDIO_MEDIUM
 
-
-        // 2. Setup WebSocket để gửi data
-//        setupWebSocket()
-        var count = 0
         // 3. Khởi tạo stream manager
         streamManager = LiveStreamManager(
             videoConfig = videoConfig,
             audioConfig = audioConfig,
             scope = lifecycleScope,
             onDataReady = { data, isVideo, timestamp ->
-                count++
-                if (count > 20) {
+//                Log.d(TAG, "onDataReady isVideo=${isVideo}    data: ${data.size}")
+                if (canSend) {
                     sendToServer(data, isVideo, timestamp)
                 }
+//                decodeFrame(data, isVideo, timestamp)
             },
             onDecoderConfig = { configs ->
                 // Gửi decoder configs nếu cần
                 Log.d(TAG, "onDecoderConfig Decoder configs ready: $configs")
-                webSocket.send(buildConfigJSON(configs))
+//                setupDecoder(decoderConfigs)
+//                webSocket.send(buildConfigJSON(configs))
 //                setupDecoder(configs)
             }
         )
@@ -190,6 +248,7 @@ class LivestreamActivity : AppCompatActivity() {
                 decoderConfigs.videoConfig.orientation
             )
         }
+        remoteView.scaleX = -1f // Mirror the remote view
 
     }
 
@@ -203,26 +262,21 @@ class LivestreamActivity : AppCompatActivity() {
         val bytes = ByteString.of(*packet)
 
         // Gửi bytes qua WebSocket
-        webSocket.send(bytes)
+//        webSocket.send(bytes)
+        sendData(bytes.toByteArray())
+    }
 
-        //Decoder
-//        val dataGet = bytes.toByteArray()
-//        val buffer = ByteBuffer.wrap(dataGet)
-//        val timestampGet = buffer.getInt()
-//        val frameType = buffer.get()
-//        val frameData = ByteArray(dataGet.size - 5)
-//        buffer.get(frameData)
-//
-//        if (frameType.toInt() == 2) {
-//            mediaDecoderManager?.decodeAudio(frameData, 0)
-//        } else {
-//            val annexBFrame: ByteArray = convertAvccOrHvccToAnnexB(frameData, 4)
-//            Log.e(
-//                TAG,
-//                "getToServer: timestamp=$timestampGet type=${frameType.toInt()} frameData=${frameData.size} annexBFrame=${annexBFrame.size}",
-//            )
-//            mediaDecoderManager?.decodeVideo(annexBFrame, 0)
-//        }
+    private fun decodeFrame(data: ByteArray, isVideo: Boolean, timestamp: Long) {
+        if (mediaDecoderManager == null) {
+            Log.e(TAG, "decodeFrame: mediaDecoderManager not initialized")
+            return
+        }
+        if (isVideo) {
+            val annexBFrame: ByteArray = convertAvccOrHvccToAnnexB(data, 4)
+            mediaDecoderManager!!.decodeVideo(annexBFrame, timestamp)
+        } else {
+            mediaDecoderManager!!.decodeAudio(data, timestamp)
+        }
     }
 
     fun convertAvccOrHvccToAnnexB(avcc: ByteArray, nalLengthSize: Int): ByteArray {
@@ -248,7 +302,7 @@ class LivestreamActivity : AppCompatActivity() {
 
     private fun openCamera() {
         cameraManager = getSystemService(CAMERA_SERVICE) as CameraManager
-        val cameraId = cameraManager.cameraIdList[0] // Back camera
+        val cameraId = getFrontCameraId(this) ?: cameraManager.cameraIdList[0] // Back camera
 
         try {
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
@@ -277,6 +331,17 @@ class LivestreamActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "Error opening camera", e)
         }
+    }
+
+    private fun getFrontCameraId(context: Context): String? {
+        for (cameraId in cameraManager.cameraIdList) {
+            val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+            val facing = characteristics.get(CameraCharacteristics.LENS_FACING)
+            if (facing == CameraCharacteristics.LENS_FACING_FRONT) {
+                return cameraId // <-- Trả về ID của camera trước
+            }
+        }
+        return null // Không có camera trước
     }
 
     private fun createCaptureSession() {
@@ -317,7 +382,7 @@ class LivestreamActivity : AppCompatActivity() {
         val characteristics = cameraManager.getCameraCharacteristics(cameraDevice!!.id)//cameraManager.getCameraCharacteristics(cameraId)
         val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION)!!
         Log.d(TAG, "startPreview: sensorOrientation=${sensorOrientation}")
-        val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         val rotation = windowManager.defaultDisplay.rotation
         Log.d(TAG, "startPreview: rotation=${rotation}")
         val deviceRotation = when (rotation) {
@@ -482,15 +547,13 @@ class LivestreamActivity : AppCompatActivity() {
 
     private fun setupWebSocket() {
         val client = OkHttpClient.Builder()
-            .readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
+            .readTimeout(0, TimeUnit.MILLISECONDS)
             .build()
 
         val request = Request.Builder()
 //            .url("wss://streaming.ermis.network/stream-gate/software/Ermis-streaming/a5d7a087-4c87-429c-9983-39189ef94829")
-//            .url("wss://streaming.ermis.network/stream-gate/software/Ermis-streaming/941b688c-cd0e-4e25-8975-e84e28c50029")
-//            .url("wss://4044.bandia.vn/publish/12345678901")
-            .url("wss://4044.bandia.vn/consume/12345678901")
-//            .url("wss://streaming.ermis.network/stream-gate/browser/Ermis-streaming/43fa06de-0e8e-4955-9ec8-daef6796634d")
+//            .url("wss://4044.bandia.vn/publish/1234")
+            .url("wss://4044.bandia.vn/consume/1234")
             .build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
@@ -514,24 +577,101 @@ class LivestreamActivity : AppCompatActivity() {
             }
 
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                if (mediaDecoderManager == null) {
-                    Log.e(TAG, "onMessage: mediaDecoderManager not initialized")
-                    return
-                }
-                Log.i(TAG, "onMessage: bytes size=${bytes.size} bytes=$bytes")
                 val data = bytes.toByteArray()
-                val buffer = ByteBuffer.wrap(data)
-                val timestamp = buffer.getInt()
-                val frameType = buffer.get()
-                val frameData = ByteArray(data.size - 5)
-                buffer.get(frameData)
-                if (frameType.toInt() == 2) {
-                    mediaDecoderManager!!.decodeAudio(frameData, 0)
-                } else {
-                    val annexBFrame: ByteArray = convertAvccOrHvccToAnnexB(frameData, 4)
-                    mediaDecoderManager!!.decodeVideo(annexBFrame, 0)
-                }
+                decoderByteArray(data)
             }
         })
+    }
+
+    private fun decoderByteArray(data: ByteArray) {
+        if (mediaDecoderManager == null) {
+            Log.e(TAG, "onMessage: mediaDecoderManager not initialized")
+            return
+        }
+        val buffer = ByteBuffer.wrap(data)
+        val timestamp = buffer.getInt()
+        val frameType = buffer.get()
+        val frameData = ByteArray(data.size - 5)
+        buffer.get(frameData)
+        if (frameType.toInt() == 2) {
+            mediaDecoderManager!!.decodeAudio(frameData, 0)
+        } else {
+            val annexBFrame: ByteArray = convertAvccOrHvccToAnnexB(frameData, 4)
+            mediaDecoderManager!!.decodeVideo(annexBFrame, 0)
+        }
+    }
+
+    suspend fun serverMode() = withContext(Dispatchers.IO) {
+        // Get local address to share with clients
+        val localAddr = endpoint.getLocalEndpointAddr()
+        Log.e(TAG, "Server listening at: $localAddr")
+        // Share this address with clients...
+
+        // Accept incoming connection (blocking)
+        Log.d(TAG, "Waiting for connection...")
+        endpoint.acceptConnection()
+        Log.d(TAG, "✓ Client connected")
+
+        // Accept bidirectional stream
+        endpoint.acceptBidiStream()
+
+        setupDecoder(decoderConfigs)
+        // Communication loop
+        while (true) {
+            try {
+                val data = endpoint.recv()
+                decoderByteArray(data)
+                Log.d(TAG, "Received: size=${data.size}")
+            } catch (e: Exception) {
+                Log.e(TAG, "Communication error", e)
+                break
+            }
+        }
+    }
+
+    suspend fun clientMode(serverAddr: String) = withContext(Dispatchers.IO) {
+        // Connect to server
+        Log.d(TAG, "Connecting to server...")
+        endpoint.connect(serverAddr)
+        Log.d(TAG, "✓ Connected")
+
+        // Open stream
+        endpoint.openBidiStream()
+        Log.d(TAG, "✓ openBidiStream")
+    }
+
+    private fun sendData(data: ByteArray) {
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                try {
+                    endpoint.send(data)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Send error", e)
+                }
+            }
+        }
+    }
+
+    private fun xemVideo() {
+        setupDecoder(decoderConfigs)
+        var recvCount = 0
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                // Communication loop
+                while (endpoint.isConnected()) {
+                    try {
+                        val data = endpoint.recv()
+                        Log.d(TAG, "Received: size=${data.size}")
+                        recvCount ++
+                        if (recvCount > 100) {
+                            decoderByteArray(data)
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Communication error", e)
+                        break
+                    }
+                }
+            }
+        }
     }
 }

@@ -30,7 +30,7 @@ class VideoEncoder(
     companion object {
         private const val TAG = "VideoEncoder"
         private const val TIMEOUT_US = 10000L
-        private const val IFRAME_INTERVAL = 0 // Keyframe mỗi 2 giây
+        private const val IFRAME_INTERVAL = 2 // Keyframe mỗi 2 giây
     }
 
     data class VideoEncoderConfig(

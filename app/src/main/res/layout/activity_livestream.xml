@@ -7,13 +7,22 @@
     android:layout_height="match_parent"
     tools:context=".LivestreamActivity">
 
+    <SurfaceView
+        android:id="@+id/remoteView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"/>
+
     <TextureView
         android:id="@+id/localView"
-        android:layout_width="200dp"
-        android:layout_height="300dp"
-        app:layout_constraintStart_toStartOf="parent"
+        android:layout_width="140dp"
+        android:layout_height="200dp"
+        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="parent"
-        android:layout_margin="6dp"/>
+        android:layout_margin="16dp"/>
 
     <Button
         android:id="@+id/btnPhat"
@@ -22,7 +31,7 @@
         android:text="phát"
         android:layout_marginTop="50dp"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"/>
+        app:layout_constraintStart_toStartOf="parent"/>
 
     <Button
         android:id="@+id/btnXem"
@@ -31,15 +40,6 @@
         android:text="Xem"
         android:layout_marginTop="50dp"
         app:layout_constraintTop_toBottomOf="@id/btnPhat"
-        app:layout_constraintEnd_toEndOf="parent"/>
-
-    <SurfaceView
-        android:id="@+id/remoteView"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent"/>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

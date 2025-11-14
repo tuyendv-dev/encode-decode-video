@@ -59,7 +59,7 @@ object EncoderPresets {
     val PRESET_720P_H265 = VideoEncoder.VideoEncoderConfig(
         width = 1280,
         height = 720,
-        bitrate = 1_500_000, // 1.5 Mbps (thấp hơn H.264 nhưng chất lượng tương đương)
+        bitrate = 800_000,
         frameRate = 30,
         codec = VideoEncoder.CodecType.H265,
         bitrateMode = VideoEncoder.BitrateMode.VBR,
