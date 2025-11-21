@@ -2,6 +2,7 @@ package com.example.demoplayvideo
 
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.os.Bundle
 import android.util.Log
@@ -42,7 +43,7 @@ class VideoEncoder(
         val codec: CodecType = CodecType.H264,
         val bitrateMode: BitrateMode = BitrateMode.VBR,
         val profile: Int = MediaCodecInfo.CodecProfileLevel.AVCProfileHigh,
-        val level: Int = MediaCodecInfo.CodecProfileLevel.AVCLevel4
+        val level: Int = MediaCodecInfo.CodecProfileLevel.AVCLevel31
     )
 
     enum class CodecType(val mimeType: String) {
@@ -58,6 +59,13 @@ class VideoEncoder(
         CQ(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CQ)
     }
 
+    enum class FrameType(val value: Int) {
+        CONFIG_DECODER(0),
+        VIDEO_KEY_FRAME(1),
+        VIDEO_DELTA_FRAME(2),
+        AUDIO_FRAME(3)
+    }
+
     data class EncodedFrame(
         val data: ByteArray,
         val isKeyFrame: Boolean,
@@ -65,13 +73,54 @@ class VideoEncoder(
         val flags: Int
     )
 
+    fun getSupportedHevcCodecs(): List<Map<String, Any>> {
+        val result = mutableListOf<Map<String, Any>>()
+
+        val codecInfos = MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos
+
+        for (info in codecInfos) {
+            for (type in info.supportedTypes) {
+                if (type.equals(MediaFormat.MIMETYPE_VIDEO_HEVC, ignoreCase = true)) {
+
+                    val caps = info.getCapabilitiesForType(type)
+                    val profileLevels = caps.profileLevels.map {
+                        mapOf(
+                            "profile" to it.profile,
+                            "level" to it.level
+                        )
+                    }
+
+                    result.add(
+                        mapOf(
+                            "name" to info.name,
+                            "isEncoder" to info.isEncoder,
+                            "profiles" to profileLevels
+                        )
+                    )
+                }
+            }
+        }
+
+        return result
+    }
+
+
     fun initialize(): Surface {
         try {
             Log.d(TAG, "Initializing encoder: ${config.codec.mimeType}, ${config.width}x${config.height}, ${config.bitrate}bps")
+            val hevcCodecs = getSupportedHevcCodecs()
 
+            hevcCodecs.forEach { codec ->
+                Log.d("HEVC", "Codec: ${codec["name"]}")
+                Log.d("HEVC", "Encoder: ${codec["isEncoder"]}")
+
+                val profiles = codec["profiles"] as List<Map<String, Int>>
+                profiles.forEach {
+                    Log.d("HEVC", "  Profile: ${it["profile"]}, Level: ${it["level"]}")
+                }
+            }
             // Tạo MediaCodec
             codec = MediaCodec.createEncoderByType(config.codec.mimeType)
-
             // Tạo MediaFormat
             val format = MediaFormat.createVideoFormat(
                 config.codec.mimeType,

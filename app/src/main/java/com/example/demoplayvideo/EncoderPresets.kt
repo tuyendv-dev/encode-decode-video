@@ -92,7 +92,7 @@ object EncoderPresets {
     val AUDIO_OPUS = AudioEncoder.AudioEncoderConfig(
         sampleRate = 48000,
         channelCount = 1,
-        bitrate = 64_000,
+        bitrate = 128_000,
         codec = AudioEncoder.CodecType.OPUS
     )
 }

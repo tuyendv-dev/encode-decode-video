@@ -18,7 +18,7 @@ class LiveStreamManager(
     private val videoConfig: VideoEncoder.VideoEncoderConfig,
     private val audioConfig: AudioEncoder.AudioEncoderConfig,
     private val scope: CoroutineScope,
-    private val onDataReady: (ByteArray, Boolean, Long) -> Unit, // data, isVideo, timestamp
+    private val onDataReady: (ByteArray, VideoEncoder.FrameType, Long) -> Unit, // data, isVideo, timestamp
     private val onDecoderConfig: (DecoderConfigs) -> Unit
 ) {
     private var videoEncoder: VideoEncoder? = null
@@ -42,7 +42,7 @@ class LiveStreamManager(
         videoEncoder = VideoEncoder(videoConfig).apply {
             encoderSurface = initialize()
             startEncoding(scope) { frame ->
-                handleEncodedFrame(frame, isVideo = true)
+                handleEncodedFrame(frame)
             }
         }
 
@@ -57,7 +57,7 @@ class LiveStreamManager(
         Log.d(TAG, "Live stream initialized")
     }
 
-    private fun handleEncodedFrame(frame: VideoEncoder.EncodedFrame, isVideo: Boolean) {
+    private fun handleEncodedFrame(frame: VideoEncoder.EncodedFrame) {
         // Kiểm tra nếu là codec config data (SPS/PPS/VPS)
         if (frame.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
             codecConfigReceived = true
@@ -75,13 +75,17 @@ class LiveStreamManager(
         }
 
         // Gửi video frame bình thường
-        onDataReady(frame.data, true, frame.timestamp)
+        onDataReady(
+            frame.data,
+            if (frame.isKeyFrame) VideoEncoder.FrameType.VIDEO_KEY_FRAME else VideoEncoder.FrameType.VIDEO_DELTA_FRAME,
+            frame.timestamp
+        )
     }
 
     private fun handleEncodedAudio(audio: AudioEncoder.EncodedAudio) {
         if (!configSent) return
         // Gửi audio data
-        onDataReady(audio.data, false, audio.timestamp)
+        onDataReady(audio.data, VideoEncoder.FrameType.AUDIO_FRAME, audio.timestamp)
     }
 
     /**

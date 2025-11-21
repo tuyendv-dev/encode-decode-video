@@ -18,11 +18,11 @@ package com.example.demoplayvideo
 // helpers directly inline like we're doing here.
 
 import com.sun.jna.Library
+import com.sun.jna.IntegerType
 import com.sun.jna.Native
 import com.sun.jna.Pointer
 import com.sun.jna.Structure
 import com.sun.jna.Callback
-import com.sun.jna.internal.Cleaner
 import com.sun.jna.ptr.*
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -33,6 +33,10 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlinx.coroutines.CancellableContinuation
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 // This is a helper for safely working with byte buffers returned from the Rust code.
@@ -69,15 +73,15 @@ open class RustBuffer : Structure() {
            }
         }
 
-        internal fun create(capacity: ULong, len: ULong, data: Pointer?): ByValue {
-            var buf = ByValue()
+        internal fun create(capacity: ULong, len: ULong, data: Pointer?): RustBuffer.ByValue {
+            var buf = RustBuffer.ByValue()
             buf.capacity = capacity.toLong()
             buf.len = len.toLong()
             buf.data = data
             return buf
         }
 
-        internal fun free(buf: ByValue) = uniffiRustCall() { status ->
+        internal fun free(buf: RustBuffer.ByValue) = uniffiRustCall() { status ->
             UniffiLib.INSTANCE.ffi_ermis_call_node_binding_rustbuffer_free(buf, status)
         }
     }
@@ -242,8 +246,8 @@ internal open class UniffiRustCallStatus : Structure() {
     }
 
     companion object {
-        fun create(code: Byte, errorBuf: RustBuffer.ByValue): ByValue {
-            val callStatus = ByValue()
+        fun create(code: Byte, errorBuf: RustBuffer.ByValue): UniffiRustCallStatus.ByValue {
+            val callStatus = UniffiRustCallStatus.ByValue()
             callStatus.code = code
             callStatus.error_buf = errorBuf
             return callStatus
@@ -251,7 +255,7 @@ internal open class UniffiRustCallStatus : Structure() {
     }
 }
 
-class InternalException(message: String) : Exception(message)
+class InternalException(message: String) : kotlin.Exception(message)
 
 /**
  * Each top-level error class has a companion object that can lift the error from the call status's rust buffer
@@ -267,7 +271,7 @@ interface UniffiRustCallStatusErrorHandler<E> {
 // synchronize itself
 
 // Call a rust function that returns a Result<>.  Pass in the Error class companion that corresponds to the Err
-private inline fun <U, E: Exception> uniffiRustCallWithError(errorHandler: UniffiRustCallStatusErrorHandler<E>, callback: (UniffiRustCallStatus) -> U): U {
+private inline fun <U, E: kotlin.Exception> uniffiRustCallWithError(errorHandler: UniffiRustCallStatusErrorHandler<E>, callback: (UniffiRustCallStatus) -> U): U {
     var status = UniffiRustCallStatus()
     val return_value = callback(status)
     uniffiCheckCallStatus(errorHandler, status)
@@ -275,7 +279,7 @@ private inline fun <U, E: Exception> uniffiRustCallWithError(errorHandler: Uniff
 }
 
 // Check UniffiRustCallStatus and throw an error if the call wasn't successful
-private fun<E: Exception> uniffiCheckCallStatus(errorHandler: UniffiRustCallStatusErrorHandler<E>, status: UniffiRustCallStatus) {
+private fun<E: kotlin.Exception> uniffiCheckCallStatus(errorHandler: UniffiRustCallStatusErrorHandler<E>, status: UniffiRustCallStatus) {
     if (status.isSuccess()) {
         return
     } else if (status.isError()) {
@@ -318,7 +322,7 @@ internal inline fun<T> uniffiTraitInterfaceCall(
 ) {
     try {
         writeReturn(makeCall())
-    } catch(e: Exception) {
+    } catch(e: kotlin.Exception) {
         callStatus.code = UNIFFI_CALL_UNEXPECTED_ERROR
         callStatus.error_buf = FfiConverterString.lower(e.toString())
     }
@@ -332,7 +336,7 @@ internal inline fun<T, reified E: Throwable> uniffiTraitInterfaceCallWithError(
 ) {
     try {
         writeReturn(makeCall())
-    } catch(e: Exception) {
+    } catch(e: kotlin.Exception) {
         if (e is E) {
             callStatus.code = UNIFFI_CALL_ERROR
             callStatus.error_buf = lowerError(e)
@@ -347,7 +351,7 @@ internal inline fun<T, reified E: Throwable> uniffiTraitInterfaceCallWithError(
 // This is used pass an opaque 64-bit handle representing a foreign object to the Rust code.
 internal class UniffiHandleMap<T: Any> {
     private val map = ConcurrentHashMap<Long, T>()
-    private val counter = AtomicLong(0)
+    private val counter = java.util.concurrent.atomic.AtomicLong(0)
 
     val size: Int
         get() = map.size
@@ -388,13 +392,13 @@ private inline fun <reified Lib : Library> loadIndirect(
 }
 
 // Define FFI callback types
-internal interface UniffiRustFutureContinuationCallback : Callback {
+internal interface UniffiRustFutureContinuationCallback : com.sun.jna.Callback {
     fun callback(`data`: Long,`pollResult`: Byte,)
 }
-internal interface UniffiForeignFutureFree : Callback {
+internal interface UniffiForeignFutureFree : com.sun.jna.Callback {
     fun callback(`handle`: Long,)
 }
-internal interface UniffiCallbackInterfaceFree : Callback {
+internal interface UniffiCallbackInterfaceFree : com.sun.jna.Callback {
     fun callback(`handle`: Long,)
 }
 @Structure.FieldOrder("handle", "free")
@@ -405,7 +409,7 @@ internal open class UniffiForeignFuture(
     class UniffiByValue(
         `handle`: Long = 0.toLong(),
         `free`: UniffiForeignFutureFree? = null,
-    ): UniffiForeignFuture(`handle`,`free`,), ByValue
+    ): UniffiForeignFuture(`handle`,`free`,), Structure.ByValue
 
    internal fun uniffiSetValue(other: UniffiForeignFuture) {
         `handle` = other.`handle`
@@ -421,7 +425,7 @@ internal open class UniffiForeignFutureStructU8(
     class UniffiByValue(
         `returnValue`: Byte = 0.toByte(),
         `callStatus`: UniffiRustCallStatus.ByValue = UniffiRustCallStatus.ByValue(),
-    ): UniffiForeignFutureStructU8(`returnValue`,`callStatus`,), ByValue
+    ): UniffiForeignFutureStructU8(`returnValue`,`callStatus`,), Structure.ByValue
 
    internal fun uniffiSetValue(other: UniffiForeignFutureStructU8) {
         `returnValue` = other.`returnValue`
@@ -429,7 +433,7 @@ internal open class UniffiForeignFutureStructU8(
     }
 
 }
-internal interface UniffiForeignFutureCompleteU8 : Callback {
+internal interface UniffiForeignFutureCompleteU8 : com.sun.jna.Callback {
     fun callback(`callbackData`: Long,`result`: UniffiForeignFutureStructU8.UniffiByValue,)
 }
 @Structure.FieldOrder("returnValue", "callStatus")
@@ -440,7 +444,7 @@ internal open class UniffiForeignFutureStructI8(
     class UniffiByValue(
         `returnValue`: Byte = 0.toByte(),
         `callStatus`: UniffiRustCallStatus.ByValue = UniffiRustCallStatus.ByValue(),
-    ): UniffiForeignFutureStructI8(`returnValue`,`callStatus`,), ByValue
+    ): UniffiForeignFutureStructI8(`returnValue`,`callStatus`,), Structure.ByValue
 
    internal fun uniffiSetValue(other: UniffiForeignFutureStructI8) {
         `returnValue` = other.`returnValue`
@@ -448,7 +452,7 @@ internal open class UniffiForeignFutureStructI8(
     }
 
 }
-internal interface UniffiForeignFutureCompleteI8 : Callback {
+internal interface UniffiForeignFutureCompleteI8 : com.sun.jna.Callback {
     fun callback(`callbackData`: Long,`result`: UniffiForeignFutureStructI8.UniffiByValue,)
 }
 @Structure.FieldOrder("returnValue", "callStatus")
@@ -459,7 +463,7 @@ internal open class UniffiForeignFutureStructU16(
     class UniffiByValue(
         `returnValue`: Short = 0.toShort(),
         `callStatus`: UniffiRustCallStatus.ByValue = UniffiRustCallStatus.ByValue(),
-    ): UniffiForeignFutureStructU16(`returnValue`,`callStatus`,), ByValue
+    ): UniffiForeignFutureStructU16(`returnValue`,`callStatus`,), Structure.ByValue
 
    internal fun uniffiSetValue(other: UniffiForeignFutureStructU16) {
         `returnValue` = other.`returnValue`
@@ -467,7 +471,7 @@ internal open class UniffiForeignFutureStructU16(
     }
 
 }
-internal interface UniffiForeignFutureCompleteU16 : Callback {
+internal interface UniffiForeignFutureCompleteU16 : com.sun.jna.Callback {
     fun callback(`callbackData`: Long,`result`: UniffiForeignFutureStructU16.UniffiByValue,)
 }
 @Structure.FieldOrder("returnValue", "callStatus")
@@ -478,7 +482,7 @@ internal open class UniffiForeignFutureStructI16(
     class UniffiByValue(
         `returnValue`: Short = 0.toShort(),
         `callStatus`: UniffiRustCallStatus.ByValue = UniffiRustCallStatus.ByValue(),
-    ): UniffiForeignFutureStructI16(`returnValue`,`callStatus`,), ByValue
+    ): UniffiForeignFutureStructI16(`returnValue`,`callStatus`,), Structure.ByValue
 
    internal fun uniffiSetValue(other: UniffiForeignFutureStructI16) {
         `returnValue` = other.`returnValue`
@@ -486,7 +490,7 @@ internal open class UniffiForeignFutureStructI16(
     }
 
 }
-internal interface UniffiForeignFutureCompleteI16 : Callback {
+internal interface UniffiForeignFutureCompleteI16 : com.sun.jna.Callback {
     fun callback(`callbackData`: Long,`result`: UniffiForeignFutureStructI16.UniffiByValue,)
 }
 @Structure.FieldOrder("returnValue", "callStatus")
@@ -497,7 +501,7 @@ internal open class UniffiForeignFutureStructU32(
     class UniffiByValue(
         `returnValue`: Int = 0,
         `callStatus`: UniffiRustCallStatus.ByValue = UniffiRustCallStatus.ByValue(),
-    ): UniffiForeignFutureStructU32(`returnValue`,`callStatus`,), ByValue
+    ): UniffiForeignFutureStructU32(`returnValue`,`callStatus`,), Structure.ByValue
 
    internal fun uniffiSetValue(other: UniffiForeignFutureStructU32) {
         `returnValue` = other.`returnValue`
@@ -505,7 +509,7 @@ internal open class UniffiForeignFutureStructU32(
     }
 
 }
-internal interface UniffiForeignFutureCompleteU32 : Callback {
+internal interface UniffiForeignFutureCompleteU32 : com.sun.jna.Callback {
     fun callback(`callbackData`: Long,`result`: UniffiForeignFutureStructU32.UniffiByValue,)
 }
 @Structure.FieldOrder("returnValue", "callStatus")
@@ -516,7 +520,7 @@ internal open class UniffiForeignFutureStructI32(
     class UniffiByValue(
         `returnValue`: Int = 0,
         `callStatus`: UniffiRustCallStatus.ByValue = UniffiRustCallStatus.ByValue(),
-    ): UniffiForeignFutureStructI32(`returnValue`,`callStatus`,), ByValue
+    ): UniffiForeignFutureStructI32(`returnValue`,`callStatus`,), Structure.ByValue
 
    internal fun uniffiSetValue(other: UniffiForeignFutureStructI32) {
         `returnValue` = other.`returnValue`
@@ -524,7 +528,7 @@ internal open class UniffiForeignFutureStructI32(
     }
 
 }
-internal interface UniffiForeignFutureCompleteI32 : Callback {
+internal interface UniffiForeignFutureCompleteI32 : com.sun.jna.Callback {
     fun callback(`callbackData`: Long,`result`: UniffiForeignFutureStructI32.UniffiByValue,)
 }
 @Structure.FieldOrder("returnValue", "callStatus")
@@ -535,7 +539,7 @@ internal open class UniffiForeignFutureStructU64(
     class UniffiByValue(
         `returnValue`: Long = 0.toLong(),
         `callStatus`: UniffiRustCallStatus.ByValue = UniffiRustCallStatus.ByValue(),
-    ): UniffiForeignFutureStructU64(`returnValue`,`callStatus`,), ByValue
+    ): UniffiForeignFutureStructU64(`returnValue`,`callStatus`,), Structure.ByValue
 
    internal fun uniffiSetValue(other: UniffiForeignFutureStructU64) {
         `returnValue` = other.`returnValue`
@@ -543,7 +547,7 @@ internal open class UniffiForeignFutureStructU64(
     }
 
 }
-internal interface UniffiForeignFutureCompleteU64 : Callback {
+internal interface UniffiForeignFutureCompleteU64 : com.sun.jna.Callback {
     fun callback(`callbackData`: Long,`result`: UniffiForeignFutureStructU64.UniffiByValue,)
 }
 @Structure.FieldOrder("returnValue", "callStatus")
@@ -554,7 +558,7 @@ internal open class UniffiForeignFutureStructI64(
     class UniffiByValue(
         `returnValue`: Long = 0.toLong(),
         `callStatus`: UniffiRustCallStatus.ByValue = UniffiRustCallStatus.ByValue(),
-    ): UniffiForeignFutureStructI64(`returnValue`,`callStatus`,), ByValue
+    ): UniffiForeignFutureStructI64(`returnValue`,`callStatus`,), Structure.ByValue
 
    internal fun uniffiSetValue(other: UniffiForeignFutureStructI64) {
         `returnValue` = other.`returnValue`
@@ -562,7 +566,7 @@ internal open class UniffiForeignFutureStructI64(
     }
 
 }
-internal interface UniffiForeignFutureCompleteI64 : Callback {
+internal interface UniffiForeignFutureCompleteI64 : com.sun.jna.Callback {
     fun callback(`callbackData`: Long,`result`: UniffiForeignFutureStructI64.UniffiByValue,)
 }
 @Structure.FieldOrder("returnValue", "callStatus")
@@ -573,7 +577,7 @@ internal open class UniffiForeignFutureStructF32(
     class UniffiByValue(
         `returnValue`: Float = 0.0f,
         `callStatus`: UniffiRustCallStatus.ByValue = UniffiRustCallStatus.ByValue(),
-    ): UniffiForeignFutureStructF32(`returnValue`,`callStatus`,), ByValue
+    ): UniffiForeignFutureStructF32(`returnValue`,`callStatus`,), Structure.ByValue
 
    internal fun uniffiSetValue(other: UniffiForeignFutureStructF32) {
         `returnValue` = other.`returnValue`
@@ -581,7 +585,7 @@ internal open class UniffiForeignFutureStructF32(
     }
 
 }
-internal interface UniffiForeignFutureCompleteF32 : Callback {
+internal interface UniffiForeignFutureCompleteF32 : com.sun.jna.Callback {
     fun callback(`callbackData`: Long,`result`: UniffiForeignFutureStructF32.UniffiByValue,)
 }
 @Structure.FieldOrder("returnValue", "callStatus")
@@ -592,7 +596,7 @@ internal open class UniffiForeignFutureStructF64(
     class UniffiByValue(
         `returnValue`: Double = 0.0,
         `callStatus`: UniffiRustCallStatus.ByValue = UniffiRustCallStatus.ByValue(),
-    ): UniffiForeignFutureStructF64(`returnValue`,`callStatus`,), ByValue
+    ): UniffiForeignFutureStructF64(`returnValue`,`callStatus`,), Structure.ByValue
 
    internal fun uniffiSetValue(other: UniffiForeignFutureStructF64) {
         `returnValue` = other.`returnValue`
@@ -600,7 +604,7 @@ internal open class UniffiForeignFutureStructF64(
     }
 
 }
-internal interface UniffiForeignFutureCompleteF64 : Callback {
+internal interface UniffiForeignFutureCompleteF64 : com.sun.jna.Callback {
     fun callback(`callbackData`: Long,`result`: UniffiForeignFutureStructF64.UniffiByValue,)
 }
 @Structure.FieldOrder("returnValue", "callStatus")
@@ -611,7 +615,7 @@ internal open class UniffiForeignFutureStructPointer(
     class UniffiByValue(
         `returnValue`: Pointer = Pointer.NULL,
         `callStatus`: UniffiRustCallStatus.ByValue = UniffiRustCallStatus.ByValue(),
-    ): UniffiForeignFutureStructPointer(`returnValue`,`callStatus`,), ByValue
+    ): UniffiForeignFutureStructPointer(`returnValue`,`callStatus`,), Structure.ByValue
 
    internal fun uniffiSetValue(other: UniffiForeignFutureStructPointer) {
         `returnValue` = other.`returnValue`
@@ -619,7 +623,7 @@ internal open class UniffiForeignFutureStructPointer(
     }
 
 }
-internal interface UniffiForeignFutureCompletePointer : Callback {
+internal interface UniffiForeignFutureCompletePointer : com.sun.jna.Callback {
     fun callback(`callbackData`: Long,`result`: UniffiForeignFutureStructPointer.UniffiByValue,)
 }
 @Structure.FieldOrder("returnValue", "callStatus")
@@ -630,7 +634,7 @@ internal open class UniffiForeignFutureStructRustBuffer(
     class UniffiByValue(
         `returnValue`: RustBuffer.ByValue = RustBuffer.ByValue(),
         `callStatus`: UniffiRustCallStatus.ByValue = UniffiRustCallStatus.ByValue(),
-    ): UniffiForeignFutureStructRustBuffer(`returnValue`,`callStatus`,), ByValue
+    ): UniffiForeignFutureStructRustBuffer(`returnValue`,`callStatus`,), Structure.ByValue
 
    internal fun uniffiSetValue(other: UniffiForeignFutureStructRustBuffer) {
         `returnValue` = other.`returnValue`
@@ -638,7 +642,7 @@ internal open class UniffiForeignFutureStructRustBuffer(
     }
 
 }
-internal interface UniffiForeignFutureCompleteRustBuffer : Callback {
+internal interface UniffiForeignFutureCompleteRustBuffer : com.sun.jna.Callback {
     fun callback(`callbackData`: Long,`result`: UniffiForeignFutureStructRustBuffer.UniffiByValue,)
 }
 @Structure.FieldOrder("callStatus")
@@ -647,18 +651,16 @@ internal open class UniffiForeignFutureStructVoid(
 ) : Structure() {
     class UniffiByValue(
         `callStatus`: UniffiRustCallStatus.ByValue = UniffiRustCallStatus.ByValue(),
-    ): UniffiForeignFutureStructVoid(`callStatus`,), ByValue
+    ): UniffiForeignFutureStructVoid(`callStatus`,), Structure.ByValue
 
    internal fun uniffiSetValue(other: UniffiForeignFutureStructVoid) {
         `callStatus` = other.`callStatus`
     }
 
 }
-internal interface UniffiForeignFutureCompleteVoid : Callback {
+internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
     fun callback(`callbackData`: Long,`result`: UniffiForeignFutureStructVoid.UniffiByValue,)
 }
-
-
 
 
 
@@ -777,8 +779,6 @@ internal interface UniffiLib : Library {
     fun uniffi_ermis_call_node_binding_fn_method_ermiscallendpoint_async_send(`ptr`: Pointer,`data`: RustBuffer.ByValue,
     ): Long
     fun uniffi_ermis_call_node_binding_fn_method_ermiscallendpoint_connect(`ptr`: Pointer,`addr`: RustBuffer.ByValue,
-    ): Long
-    fun uniffi_ermis_call_node_binding_fn_method_ermiscallendpoint_connect_android(`ptr`: Pointer,`addr`: RustBuffer.ByValue,
     ): Long
     fun uniffi_ermis_call_node_binding_fn_method_ermiscallendpoint_get_connection_stats(`ptr`: Pointer,
     ): Long
@@ -914,8 +914,6 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_ermis_call_node_binding_checksum_method_ermiscallendpoint_connect(
     ): Short
-    fun uniffi_ermis_call_node_binding_checksum_method_ermiscallendpoint_connect_android(
-    ): Short
     fun uniffi_ermis_call_node_binding_checksum_method_ermiscallendpoint_get_connection_stats(
     ): Short
     fun uniffi_ermis_call_node_binding_checksum_method_ermiscallendpoint_get_local_endpoint_addr(
@@ -962,9 +960,6 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_ermis_call_node_binding_checksum_method_ermiscallendpoint_connect() != 3737.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_ermis_call_node_binding_checksum_method_ermiscallendpoint_connect_android() != 14549.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
     if (lib.uniffi_ermis_call_node_binding_checksum_method_ermiscallendpoint_get_connection_stats() != 33845.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1003,7 +998,7 @@ internal object uniffiRustFutureContinuationCallbackImpl: UniffiRustFutureContin
     }
 }
 
-internal suspend fun<T, F, E: Exception> uniffiRustCallAsync(
+internal suspend fun<T, F, E: kotlin.Exception> uniffiRustCallAsync(
     rustFuture: Long,
     pollFunc: (Long, UniffiRustFutureContinuationCallback, Long) -> Unit,
     completeFunc: (Long, UniffiRustCallStatus) -> F,
@@ -1332,21 +1327,21 @@ interface UniffiCleaner {
         fun clean()
     }
 
-    fun register(value: Any, cleanUpTask: Runnable): Cleanable
+    fun register(value: Any, cleanUpTask: Runnable): UniffiCleaner.Cleanable
 
     companion object
 }
 
 // The fallback Jna cleaner, which is available for both Android, and the JVM.
 private class UniffiJnaCleaner : UniffiCleaner {
-    private val cleaner = Cleaner.getCleaner()
+    private val cleaner = com.sun.jna.internal.Cleaner.getCleaner()
 
     override fun register(value: Any, cleanUpTask: Runnable): UniffiCleaner.Cleanable =
         UniffiJnaCleanable(cleaner.register(value, cleanUpTask))
 }
 
 private class UniffiJnaCleanable(
-    private val cleanable: Cleaner.Cleanable,
+    private val cleanable: com.sun.jna.internal.Cleaner.Cleanable,
 ) : UniffiCleaner.Cleanable {
     override fun clean() = cleanable.clean()
 }
@@ -1361,7 +1356,7 @@ private fun UniffiCleaner.Companion.create(): UniffiCleaner =
         // mode, but is being run on Android, then we still need to think about
         // Android API versions.
         // So we check if java.lang.ref.Cleaner is there, and use that…
-        Class.forName("java.lang.ref.Cleaner")
+        java.lang.Class.forName("java.lang.ref.Cleaner")
         JavaLangRefCleaner()
     } catch (e: ClassNotFoundException) {
         // … otherwise, fallback to the JNA cleaner.
@@ -1386,25 +1381,23 @@ public interface ErmisCallEndpointInterface {
     
     suspend fun `acceptConnection`()
     
-    suspend fun `asyncRecv`(): ByteArray
+    suspend fun `asyncRecv`(): kotlin.ByteArray
     
-    suspend fun `asyncSend`(`data`: ByteArray)
+    suspend fun `asyncSend`(`data`: kotlin.ByteArray)
     
-    suspend fun `connect`(`addr`: String)
-    
-    suspend fun `connectAndroid`(`addr`: String)
+    suspend fun `connect`(`addr`: kotlin.String)
     
     suspend fun `getConnectionStats`(): ConnectionStats
     
-    suspend fun `getLocalEndpointAddr`(): String
+    suspend fun `getLocalEndpointAddr`(): kotlin.String
     
-    suspend fun `isConnected`(): Boolean
+    suspend fun `isConnected`(): kotlin.Boolean
     
     suspend fun `openBidiStream`()
     
-    suspend fun `recv`(): ByteArray
+    suspend fun `recv`(): kotlin.ByteArray
     
-    suspend fun `send`(`data`: ByteArray)
+    suspend fun `send`(`data`: kotlin.ByteArray)
     
     companion object
 }
@@ -1426,7 +1419,7 @@ open class ErmisCallEndpoint: Disposable, AutoCloseable, ErmisCallEndpointInterf
         this.pointer = null
         this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(pointer))
     }
-    constructor(`relayUrls`: List<String>, `secretKey`: ByteArray?) :
+    constructor(`relayUrls`: List<kotlin.String>, `secretKey`: kotlin.ByteArray?) :
         this(
     uniffiRustCallWithError(ErmisCallException) { _status ->
     UniffiLib.INSTANCE.uniffi_ermis_call_node_binding_fn_constructor_ermiscallendpoint_new(
@@ -1544,7 +1537,7 @@ open class ErmisCallEndpoint: Disposable, AutoCloseable, ErmisCallEndpointInterf
     
     @Throws(ErmisCallException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-    override suspend fun `asyncRecv`() : ByteArray {
+    override suspend fun `asyncRecv`() : kotlin.ByteArray {
         return uniffiRustCallAsync(
         callWithPointer { thisPtr ->
             UniffiLib.INSTANCE.uniffi_ermis_call_node_binding_fn_method_ermiscallendpoint_async_recv(
@@ -1565,7 +1558,7 @@ open class ErmisCallEndpoint: Disposable, AutoCloseable, ErmisCallEndpointInterf
     
     @Throws(ErmisCallException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-    override suspend fun `asyncSend`(`data`: ByteArray) {
+    override suspend fun `asyncSend`(`data`: kotlin.ByteArray) {
         return uniffiRustCallAsync(
         callWithPointer { thisPtr ->
             UniffiLib.INSTANCE.uniffi_ermis_call_node_binding_fn_method_ermiscallendpoint_async_send(
@@ -1587,32 +1580,10 @@ open class ErmisCallEndpoint: Disposable, AutoCloseable, ErmisCallEndpointInterf
     
     @Throws(ErmisCallException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-    override suspend fun `connect`(`addr`: String) {
+    override suspend fun `connect`(`addr`: kotlin.String) {
         return uniffiRustCallAsync(
         callWithPointer { thisPtr ->
             UniffiLib.INSTANCE.uniffi_ermis_call_node_binding_fn_method_ermiscallendpoint_connect(
-                thisPtr,
-                FfiConverterString.lower(`addr`),
-            )
-        },
-        { future, callback, continuation -> UniffiLib.INSTANCE.ffi_ermis_call_node_binding_rust_future_poll_void(future, callback, continuation) },
-        { future, continuation -> UniffiLib.INSTANCE.ffi_ermis_call_node_binding_rust_future_complete_void(future, continuation) },
-        { future -> UniffiLib.INSTANCE.ffi_ermis_call_node_binding_rust_future_free_void(future) },
-        // lift function
-        { Unit },
-        
-        // Error FFI converter
-        ErmisCallException.ErrorHandler,
-    )
-    }
-
-    
-    @Throws(ErmisCallException::class)
-    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-    override suspend fun `connectAndroid`(`addr`: String) {
-        return uniffiRustCallAsync(
-        callWithPointer { thisPtr ->
-            UniffiLib.INSTANCE.uniffi_ermis_call_node_binding_fn_method_ermiscallendpoint_connect_android(
                 thisPtr,
                 FfiConverterString.lower(`addr`),
             )
@@ -1651,7 +1622,7 @@ open class ErmisCallEndpoint: Disposable, AutoCloseable, ErmisCallEndpointInterf
     
     @Throws(ErmisCallException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-    override suspend fun `getLocalEndpointAddr`() : String {
+    override suspend fun `getLocalEndpointAddr`() : kotlin.String {
         return uniffiRustCallAsync(
         callWithPointer { thisPtr ->
             UniffiLib.INSTANCE.uniffi_ermis_call_node_binding_fn_method_ermiscallendpoint_get_local_endpoint_addr(
@@ -1672,7 +1643,7 @@ open class ErmisCallEndpoint: Disposable, AutoCloseable, ErmisCallEndpointInterf
     
     @Throws(ErmisCallException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-    override suspend fun `isConnected`() : Boolean {
+    override suspend fun `isConnected`() : kotlin.Boolean {
         return uniffiRustCallAsync(
         callWithPointer { thisPtr ->
             UniffiLib.INSTANCE.uniffi_ermis_call_node_binding_fn_method_ermiscallendpoint_is_connected(
@@ -1715,7 +1686,7 @@ open class ErmisCallEndpoint: Disposable, AutoCloseable, ErmisCallEndpointInterf
     
     @Throws(ErmisCallException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-    override suspend fun `recv`() : ByteArray {
+    override suspend fun `recv`() : kotlin.ByteArray {
         return uniffiRustCallAsync(
         callWithPointer { thisPtr ->
             UniffiLib.INSTANCE.uniffi_ermis_call_node_binding_fn_method_ermiscallendpoint_recv(
@@ -1736,7 +1707,7 @@ open class ErmisCallEndpoint: Disposable, AutoCloseable, ErmisCallEndpointInterf
     
     @Throws(ErmisCallException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-    override suspend fun `send`(`data`: ByteArray) {
+    override suspend fun `send`(`data`: kotlin.ByteArray) {
         return uniffiRustCallAsync(
         callWithPointer { thisPtr ->
             UniffiLib.INSTANCE.uniffi_ermis_call_node_binding_fn_method_ermiscallendpoint_send(
@@ -1795,8 +1766,8 @@ public object FfiConverterTypeErmisCallEndpoint: FfiConverter<ErmisCallEndpoint,
 
 data class ConnectionStats (
     var `connectionType`: ConnectionTypeWrapper?, 
-    var `roundTripTimeMs`: ULong?,
-    var `packetLoss`: Double?
+    var `roundTripTimeMs`: kotlin.ULong?, 
+    var `packetLoss`: kotlin.Double?
 ) {
     
     companion object
@@ -1863,11 +1834,11 @@ public object FfiConverterTypeConnectionTypeWrapper: FfiConverterRustBuffer<Conn
 
 
 
-sealed class ErmisCallException: Exception() {
+sealed class ErmisCallException: kotlin.Exception() {
     
     class ConnectionException(
         
-        val `msg`: String
+        val `msg`: kotlin.String
         ) : ErmisCallException() {
         override val message
             get() = "msg=${ `msg` }"
@@ -1881,7 +1852,7 @@ sealed class ErmisCallException: Exception() {
     
     class StreamException(
         
-        val `msg`: String
+        val `msg`: kotlin.String
         ) : ErmisCallException() {
         override val message
             get() = "msg=${ `msg` }"
@@ -1889,7 +1860,7 @@ sealed class ErmisCallException: Exception() {
     
     class EncodingException(
         
-        val `msg`: String
+        val `msg`: kotlin.String
         ) : ErmisCallException() {
         override val message
             get() = "msg=${ `msg` }"
@@ -1897,7 +1868,7 @@ sealed class ErmisCallException: Exception() {
     
     class IoException(
         
-        val `msg`: String
+        val `msg`: kotlin.String
         ) : ErmisCallException() {
         override val message
             get() = "msg=${ `msg` }"
@@ -2002,15 +1973,15 @@ public object FfiConverterTypeErmisCallError : FfiConverterRustBuffer<ErmisCallE
 /**
  * @suppress
  */
-public object FfiConverterOptionalULong: FfiConverterRustBuffer<ULong?> {
-    override fun read(buf: ByteBuffer): ULong? {
+public object FfiConverterOptionalULong: FfiConverterRustBuffer<kotlin.ULong?> {
+    override fun read(buf: ByteBuffer): kotlin.ULong? {
         if (buf.get().toInt() == 0) {
             return null
         }
         return FfiConverterULong.read(buf)
     }
 
-    override fun allocationSize(value: ULong?): ULong {
+    override fun allocationSize(value: kotlin.ULong?): ULong {
         if (value == null) {
             return 1UL
         } else {
@@ -2018,7 +1989,7 @@ public object FfiConverterOptionalULong: FfiConverterRustBuffer<ULong?> {
         }
     }
 
-    override fun write(value: ULong?, buf: ByteBuffer) {
+    override fun write(value: kotlin.ULong?, buf: ByteBuffer) {
         if (value == null) {
             buf.put(0)
         } else {
@@ -2034,15 +2005,15 @@ public object FfiConverterOptionalULong: FfiConverterRustBuffer<ULong?> {
 /**
  * @suppress
  */
-public object FfiConverterOptionalDouble: FfiConverterRustBuffer<Double?> {
-    override fun read(buf: ByteBuffer): Double? {
+public object FfiConverterOptionalDouble: FfiConverterRustBuffer<kotlin.Double?> {
+    override fun read(buf: ByteBuffer): kotlin.Double? {
         if (buf.get().toInt() == 0) {
             return null
         }
         return FfiConverterDouble.read(buf)
     }
 
-    override fun allocationSize(value: Double?): ULong {
+    override fun allocationSize(value: kotlin.Double?): ULong {
         if (value == null) {
             return 1UL
         } else {
@@ -2050,7 +2021,7 @@ public object FfiConverterOptionalDouble: FfiConverterRustBuffer<Double?> {
         }
     }
 
-    override fun write(value: Double?, buf: ByteBuffer) {
+    override fun write(value: kotlin.Double?, buf: ByteBuffer) {
         if (value == null) {
             buf.put(0)
         } else {
@@ -2066,15 +2037,15 @@ public object FfiConverterOptionalDouble: FfiConverterRustBuffer<Double?> {
 /**
  * @suppress
  */
-public object FfiConverterOptionalByteArray: FfiConverterRustBuffer<ByteArray?> {
-    override fun read(buf: ByteBuffer): ByteArray? {
+public object FfiConverterOptionalByteArray: FfiConverterRustBuffer<kotlin.ByteArray?> {
+    override fun read(buf: ByteBuffer): kotlin.ByteArray? {
         if (buf.get().toInt() == 0) {
             return null
         }
         return FfiConverterByteArray.read(buf)
     }
 
-    override fun allocationSize(value: ByteArray?): ULong {
+    override fun allocationSize(value: kotlin.ByteArray?): ULong {
         if (value == null) {
             return 1UL
         } else {
@@ -2082,7 +2053,7 @@ public object FfiConverterOptionalByteArray: FfiConverterRustBuffer<ByteArray?> 
         }
     }
 
-    override fun write(value: ByteArray?, buf: ByteBuffer) {
+    override fun write(value: kotlin.ByteArray?, buf: ByteBuffer) {
         if (value == null) {
             buf.put(0)
         } else {
@@ -2130,21 +2101,21 @@ public object FfiConverterOptionalTypeConnectionTypeWrapper: FfiConverterRustBuf
 /**
  * @suppress
  */
-public object FfiConverterSequenceString: FfiConverterRustBuffer<List<String>> {
-    override fun read(buf: ByteBuffer): List<String> {
+public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.String>> {
+    override fun read(buf: ByteBuffer): List<kotlin.String> {
         val len = buf.getInt()
-        return List<String>(len) {
+        return List<kotlin.String>(len) {
             FfiConverterString.read(buf)
         }
     }
 
-    override fun allocationSize(value: List<String>): ULong {
+    override fun allocationSize(value: List<kotlin.String>): ULong {
         val sizeForLength = 4UL
         val sizeForItems = value.map { FfiConverterString.allocationSize(it) }.sum()
         return sizeForLength + sizeForItems
     }
 
-    override fun write(value: List<String>, buf: ByteBuffer) {
+    override fun write(value: List<kotlin.String>, buf: ByteBuffer) {
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterString.write(it, buf)
